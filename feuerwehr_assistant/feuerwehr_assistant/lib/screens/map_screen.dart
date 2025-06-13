@@ -5,6 +5,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
+import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
+import 'package:flutter_map_marker_cluster_plus/flutter_map_marker_cluster_plus.dart';
 import '../providers/auth_provider.dart';
 
 class MapScreen extends StatefulWidget {
@@ -39,7 +41,6 @@ class _MapScreenState extends State<MapScreen> {
   void _handleMapMovement() {
     if (_mapController.bounds == null) return;
     
-    // Nur neu laden wenn sich die Bounds signifikant geändert haben
     if (_lastLoadedBounds == null || 
         !_lastLoadedBounds!.containsBounds(_mapController.bounds!)) {
       _loadHydrants(_mapController.bounds!);
@@ -123,10 +124,12 @@ class _MapScreenState extends State<MapScreen> {
             if (lat != null && lon != null) {
               _hydrantMarkers.add(
                 Marker(
-                  width: 12,
-                  height: 12,
+                  width: 40,
+                  height: 40,
                   point: LatLng(lat, lon),
                   builder: (ctx) => Container(
+                    width: 12,
+                    height: 12,
                     decoration: BoxDecoration(
                       color: Colors.red,
                       shape: BoxShape.circle,
@@ -189,6 +192,7 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     final isMaster = Provider.of<AuthProvider>(context).isMaster;
+    final allMarkers = [..._tacticalMarkers, if (_showHydrants) ..._hydrantMarkers];
 
     return Scaffold(
       body: Stack(
@@ -201,12 +205,39 @@ class _MapScreenState extends State<MapScreen> {
               onTap: (_, latlng) => _handleMapTap(latlng),
             ),
             children: [
+              // Tile caching layer
               TileLayer(
                 urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                 subdomains: const ['a', 'b', 'c'],
+                tileProvider: FMTC.instance('mapCache').getTileProvider(),
               ),
-              MarkerLayer(markers: _tacticalMarkers),
-              if (_showHydrants) MarkerLayer(markers: _hydrantMarkers),
+              
+              // Marker cluster layer - ohne Controller!
+              MarkerClusterLayerWidget(
+                options: MarkerClusterLayerOptions(
+                  maxClusterRadius: 60,
+                  size: const Size(40, 40),
+                  anchorPos: AnchorPos.align(AnchorAlign.center),
+                  markers: allMarkers,
+                  builder: (context, markers) {
+                    if (markers.length == 1) {
+                      return markers.first.builder(context);
+                    }
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Center(
+                        child: Text(
+                          markers.length.toString(),
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ],
           ),
           Positioned(
