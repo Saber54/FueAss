@@ -53,7 +53,7 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _initializeOfflineData() async {
     try {
       // Initialisiere FMTC
-     await FMTCStore.;
+     await FMTCObjectBoxBackend().initialise();
       _mapStore = FMTCStore('mapCache');
       
       final appDir = await getApplicationDocumentsDirectory();
