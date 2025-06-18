@@ -207,11 +207,10 @@ class _MapScreenState extends State<MapScreen> {
               onTap: _handleMapTap,
             ),
             children: [
-              // Tile layer mit Caching
+              // Tile layer ohne Subdomains und ohne Caching
               TileLayer(
-                urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c'],
-                tileProvider: FMTCStore('mapCache').getTileProvider(),
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.firefighter_app',
               ),
               
               // Marker cluster layer
