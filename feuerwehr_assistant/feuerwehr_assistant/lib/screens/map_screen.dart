@@ -39,12 +39,14 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _handleMapMovement() {
-    if (_mapController.bounds == null) return;
+    // Aktuelle Kamera Position und Zoom abrufen
+    final camera = _mapController.camera;
+    final bounds = camera.visibleBounds;
     
     if (_lastLoadedBounds == null || 
-        !_lastLoadedBounds!.containsBounds(_mapController.bounds!)) {
-      _loadHydrants(_mapController.bounds!);
-      _lastLoadedBounds = _mapController.bounds;
+        !_lastLoadedBounds!.containsBounds(bounds)) {
+      _loadHydrants(bounds);
+      _lastLoadedBounds = bounds;
     }
   }
 
@@ -127,7 +129,7 @@ class _MapScreenState extends State<MapScreen> {
                   width: 40,
                   height: 40,
                   point: LatLng(lat, lon),
-                  builder: (ctx) => Container(
+                  child: Container(
                     width: 12,
                     height: 12,
                     decoration: BoxDecoration(
@@ -147,7 +149,7 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _handleMapTap(LatLng latlng) {
+  void _handleMapTap(TapPosition tapPosition, LatLng latlng) {
     setState(() {
       _lastTapPosition = latlng;
     });
@@ -161,7 +163,7 @@ class _MapScreenState extends State<MapScreen> {
           width: 40,
           height: 40,
           point: _lastTapPosition!,
-          builder: (ctx) => const Icon(
+          child: const Icon(
             Icons.directions_car,
             color: Colors.blue,
             size: 40,
@@ -179,7 +181,7 @@ class _MapScreenState extends State<MapScreen> {
           width: 40,
           height: 40,
           point: _lastTapPosition!,
-          builder: (ctx) => const Icon(
+          child: const Icon(
             Icons.warning,
             color: Colors.red,
             size: 40,
@@ -200,28 +202,28 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              center: const LatLng(51.1657, 10.4515),
-              zoom: 12,
-              onTap: (_, latlng) => _handleMapTap(latlng),
+              initialCenter: const LatLng(51.1657, 10.4515),
+              initialZoom: 12,
+              onTap: _handleMapTap,
             ),
             children: [
-              // Tile caching layer
+              // Tile layer mit Caching
               TileLayer(
                 urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                 subdomains: const ['a', 'b', 'c'],
-                tileProvider: FMTC.instance('mapCache').getTileProvider(),
+                tileProvider: FMTCStore('mapCache').getTileProvider(),
               ),
               
-              // Marker cluster layer - ohne Controller!
+              // Marker cluster layer
               MarkerClusterLayerWidget(
                 options: MarkerClusterLayerOptions(
                   maxClusterRadius: 60,
                   size: const Size(40, 40),
-                  anchorPos: AnchorPos.align(AnchorAlign.center),
+                  alignment: Alignment.center,
                   markers: allMarkers,
                   builder: (context, markers) {
                     if (markers.length == 1) {
-                      return markers.first.builder(context);
+                      return markers.first.child;
                     }
                     return Container(
                       decoration: BoxDecoration(
@@ -253,7 +255,11 @@ class _MapScreenState extends State<MapScreen> {
                   hintText: 'Ort suchen...',
                   prefixIcon: const Icon(Icons.search),
                   suffixIcon: _isSearching 
-                      ? const CircularProgressIndicator(strokeWidth: 2)
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2)
+                        )
                       : null,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -302,8 +308,10 @@ class _MapScreenState extends State<MapScreen> {
                       value: _showHydrants,
                       onChanged: (value) {
                         setState(() => _showHydrants = value);
-                        if (value && _mapController.bounds != null) {
-                          _loadHydrants(_mapController.bounds!);
+                        if (value) {
+                          final camera = _mapController.camera;
+                          final bounds = camera.visibleBounds;
+                          _loadHydrants(bounds);
                         }
                       },
                     ),
