@@ -10,6 +10,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 import 'package:flutter_map_marker_cluster_plus/flutter_map_marker_cluster_plus.dart';
 import '../providers/auth_provider.dart';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -28,6 +35,9 @@ class _MapScreenState extends State<MapScreen> {
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
   LatLngBounds? _lastLoadedBounds;
+
+  final GlobalKey _mapKey = GlobalKey();
+  bool _isCapturing = false;
   
   // Offline/Caching Variablen
   bool _isOfflineMode = false;
@@ -291,7 +301,8 @@ class _MapScreenState extends State<MapScreen> {
           userAgentPackageName: 'com.example.firefighter_app',
         ),
       );
-      
+
+     
       // Download mit Progress-Tracking
       final downloadProgress = _mapStore!.download.startForeground(
         region: downloadable,
@@ -319,6 +330,224 @@ await for (final progress in download.downloadProgress) {
     }
   }
 
+  Future<Uint8List?> _captureMapAsImage() async {
+  try {
+    final RenderRepaintBoundary boundary = 
+        _mapKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    
+    final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    
+    return byteData?.buffer.asUint8List();
+  } catch (e) {
+    debugPrint('Error capturing image: $e');
+    return null;
+  }
+}
+
+Future<pw.Document> _createMapPDF(Uint8List imageBytes) async {
+  final pdf = pw.Document();
+  final image = pw.MemoryImage(imageBytes);
+  
+  // Aktuelle Karteninformationen sammeln
+  final camera = _mapController.camera;
+  final center = camera.center;
+  final zoom = camera.zoom;
+  final timestamp = DateTime.now();
+  
+  pdf.addPage(
+    pw.Page(
+      pageFormat: PdfPageFormat.a4,
+      build: (pw.Context context) {
+        return pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            // Header
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(10),
+              decoration: const pw.BoxDecoration(
+                color: PdfColors.grey200,
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'Feuerwehr Lagekarte',
+                    style: pw.TextStyle(
+                      fontSize: 18,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Text(
+                    'Erstellt am: ${timestamp.day}.${timestamp.month}.${timestamp.year} um ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')} Uhr',
+                    style: const pw.TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            
+            pw.SizedBox(height: 20),
+            
+            // Kartenausschnitt
+            pw.Expanded(
+              child: pw.Container(
+                width: double.infinity,
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey),
+                ),
+                child: pw.Image(image, fit: pw.BoxFit.contain),
+              ),
+            ),
+            
+            pw.SizedBox(height: 20),
+            
+            // Karteninformationen
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(10),
+              decoration: const pw.BoxDecoration(
+                color: PdfColors.grey100,
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'Karteninformationen:',
+                    style: pw.TextStyle(
+                      fontSize: 14,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Text('Zentrum: ${center.latitude.toStringAsFixed(6)}, ${center.longitude.toStringAsFixed(6)}'),
+                  pw.Text('Zoom-Level: ${zoom.toStringAsFixed(1)}'),
+                  pw.Text('Modus: ${_isOfflineMode ? "Offline (Deutschland)" : "Online"}'),
+                  if (_showHydrants)
+                    pw.Text('Hydranten: ${_hydrantMarkers.length} angezeigt'),
+                  if (_tacticalMarkers.isNotEmpty)
+                    pw.Text('Taktische Marker: ${_tacticalMarkers.length}'),
+                ],
+              ),
+            ),
+            
+            // Legende
+            if (_showHydrants || _tacticalMarkers.isNotEmpty)
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(10),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'Legende:',
+                      style: pw.TextStyle(
+                        fontSize: 14,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 5),
+                    if (_showHydrants)
+                      pw.Row(
+                        children: [
+                          pw.Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const pw.BoxDecoration(
+                              color: PdfColors.red,
+                              shape: pw.BoxShape.circle,
+                            ),
+                          ),
+                          pw.SizedBox(width: 5),
+                          pw.Text('Hydranten'),
+                        ],
+                      ),
+                    if (_tacticalMarkers.isNotEmpty) ...[
+                      pw.SizedBox(height: 3),
+                      pw.Text('🚗 Fahrzeuge (blau)'),
+                      pw.SizedBox(height: 3),
+                      pw.Text('⚠️ Gefahrenstellen (rot)'),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    ),
+  );
+  
+  return pdf;
+}
+
+Future<void> _showPrintDialog(pw.Document pdf) async {
+  final action = await showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Karte exportieren'),
+      content: const Text('Wie möchten Sie die Karte exportieren?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('cancel'),
+          child: const Text('Abbrechen'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('share'),
+          child: const Text('Teilen'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop('print'),
+          child: const Text('Drucken'),
+        ),
+      ],
+    ),
+  );
+  
+  if (action == 'print') {
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'Feuerwehr_Lagekarte_${DateTime.now().millisecondsSinceEpoch}',
+    );
+  } else if (action == 'share') {
+    final bytes = await pdf.save();
+    final fileName = 'Feuerwehr_Lagekarte_${DateTime.now().millisecondsSinceEpoch}.pdf';
+    
+    await Share.shareXFiles(
+      [XFile.fromData(bytes, name: fileName, mimeType: 'application/pdf')],
+      text: 'Feuerwehr Lagekarte',
+    );
+  }
+}
+
+Future<void> _captureAndPrintMap() async {
+  if (_isCapturing) return;
+  
+  setState(() => _isCapturing = true);
+  
+  try {
+    // Screenshot der Karte erstellen
+    final Uint8List? imageBytes = await _captureMapAsImage();
+    
+    if (imageBytes != null) {
+      // PDF erstellen
+      final pdf = await _createMapPDF(imageBytes);
+      
+      // Druck/Vorschau-Dialog anzeigen
+      await _showPrintDialog(pdf);
+    }
+  } catch (e) {
+    debugPrint('Error capturing map: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Fehler beim Erstellen der Karte: $e')),
+      );
+    }
+  } finally {
+    setState(() => _isCapturing = false);
+  }
+}
+
   Future<void> _saveMetadata() async {
     final metaFile = File('${_offlineDataPath!}/meta.json');
     final metadata = {
@@ -343,6 +572,26 @@ await for (final progress in download.downloadProgress) {
       _lastLoadedBounds = bounds;
     }
   }
+
+Widget _buildPdfButton() {
+  return Positioned(
+    top: MediaQuery.of(context).padding.top + 10,
+    right: 20,
+    child: FloatingActionButton(
+      heroTag: 'pdf_export',
+      onPressed: _isCapturing ? null : _captureAndPrintMap,
+      backgroundColor: Colors.white,
+      foregroundColor: Colors.black,
+      child: _isCapturing 
+          ? const SizedBox(
+              width: 20, 
+              height: 20, 
+              child: CircularProgressIndicator(strokeWidth: 2)
+            )
+          : const Icon(Icons.picture_as_pdf),
+    ),
+  );
+}
 
   void _loadOfflineHydrants(LatLngBounds bounds) {
     setState(() {
@@ -516,17 +765,20 @@ await for (final progress in download.downloadProgress) {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isMaster = Provider.of<AuthProvider>(context).isMaster;
-    
-    // Separate Marker-Listen für Clustering
-    final clusterMarkers = [..._tacticalMarkers]; // Nur taktische Marker clustern
+ @override
+Widget build(BuildContext context) {
+  final isMaster = Provider.of<AuthProvider>(context).isMaster;
+  
+  // Separate Marker-Listen für Clustering
+  final clusterMarkers = [..._tacticalMarkers]; // Nur taktische Marker clustern
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          FlutterMap(
+  return Scaffold(
+    body: Stack(
+      children: [
+        // A) ÄNDERUNG: RepaintBoundary um die FlutterMap wickeln
+        RepaintBoundary(
+          key: _mapKey,  // <- NEU: GlobalKey hinzufügen
+          child: FlutterMap(
             mapController: _mapController,
             options: MapOptions(
               // Deutschland Zentrum
@@ -584,154 +836,158 @@ await for (final progress in download.downloadProgress) {
                 ),
             ],
           ),
-          
-          // Download Progress Overlay
-          if (_isDownloading)
-            Container(
-              color: Colors.black54,
-              child: Center(
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Lade Deutschland-Karten herunter...',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 16),
-                        LinearProgressIndicator(value: _downloadProgress),
-                        const SizedBox(height: 8),
-                        Text('${(_downloadProgress * 100).toInt()}%'),
-                      ],
-                    ),
+        ), // <- RepaintBoundary Ende
+        
+        // Download Progress Overlay bleibt unverändert
+        if (_isDownloading)
+          Container(
+            color: Colors.black54,
+            child: Center(
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Lade Deutschland-Karten herunter...',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 16),
+                      LinearProgressIndicator(value: _downloadProgress),
+                      const SizedBox(height: 8),
+                      Text('${(_downloadProgress * 100).toInt()}%'),
+                    ],
                   ),
                 ),
               ),
             ),
-          
-          // Suchfeld
+          ),
+        
+        // Suchfeld bleibt unverändert
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 10,
+          left: 20,
+          right: 20,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Ort in Deutschland suchen...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _isSearching 
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2)
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+              ),
+              onSubmitted: _searchLocation,
+            ),
+          ),
+        ),
+        
+        // B) NEU: PDF-Button hinzufügen (nach dem Suchfeld, vor Suchergebnissen)
+        _buildPdfButton(),
+        
+        // Suchergebnisse bleiben unverändert
+        if (_searchResults.isNotEmpty)
           Positioned(
-            top: MediaQuery.of(context).padding.top + 10,
+            top: MediaQuery.of(context).padding.top + 60,
             left: 20,
             right: 20,
             child: Material(
               elevation: 4,
               borderRadius: BorderRadius.circular(8),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Ort in Deutschland suchen...',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _isSearching 
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2)
-                        )
-                      : null,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                ),
-                onSubmitted: _searchLocation,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _searchResults.length,
+                itemBuilder: (context, index) {
+                  final result = _searchResults[index];
+                  return ListTile(
+                    title: Text(result['displayName']),
+                    onTap: () => _zoomToLocation(LatLng(result['lat'], result['lon'])),
+                  );
+                },
               ),
             ),
           ),
-          
-          // Suchergebnisse
-          if (_searchResults.isNotEmpty)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 60,
-              left: 20,
-              right: 20,
-              child: Material(
-                elevation: 4,
-                borderRadius: BorderRadius.circular(8),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _searchResults.length,
-                  itemBuilder: (context, index) {
-                    final result = _searchResults[index];
-                    return ListTile(
-                      title: Text(result['displayName']),
-                      onTap: () => _zoomToLocation(LatLng(result['lat'], result['lon'])),
-                    );
-                  },
-                ),
-              ),
-            ),
-          
-          // Steuerungspanel
-          Positioned(
-            left: 10,
-            bottom: 10,
-            child: Card(
-              color: Colors.white.withOpacity(0.9),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        const Text('Hydranten'),
-                        Switch(
-                          value: _showHydrants,
-                          onChanged: (value) {
-                            setState(() => _showHydrants = value);
-                            if (value) {
-                              final camera = _mapController.camera;
-                              final bounds = camera.visibleBounds;
-                              if (_isOfflineMode) {
-                                _loadOfflineHydrants(bounds);
-                              } else {
-                                _loadHydrants(bounds);
-                              }
+        
+        // Steuerungspanel bleibt unverändert
+        Positioned(
+          left: 10,
+          bottom: 10,
+          child: Card(
+            color: Colors.white.withOpacity(0.9),
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Text('Hydranten'),
+                      Switch(
+                        value: _showHydrants,
+                        onChanged: (value) {
+                          setState(() => _showHydrants = value);
+                          if (value) {
+                            final camera = _mapController.camera;
+                            final bounds = camera.visibleBounds;
+                            if (_isOfflineMode) {
+                              _loadOfflineHydrants(bounds);
+                            } else {
+                              _loadHydrants(bounds);
                             }
-                          },
-                        ),
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  if (_isOfflineMode)
+                    const Row(
+                      children: [
+                        Icon(Icons.offline_bolt, size: 16, color: Colors.green),
+                        SizedBox(width: 4),
+                        Text('Deutschland Offline', style: TextStyle(fontSize: 12)),
                       ],
                     ),
-                    if (_isOfflineMode)
-                      const Row(
-                        children: [
-                          Icon(Icons.offline_bolt, size: 16, color: Colors.green),
-                          SizedBox(width: 4),
-                          Text('Deutschland Offline', style: TextStyle(fontSize: 12)),
-                        ],
-                      ),
-                  ],
-                ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
-      floatingActionButton: isMaster
-          ? Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                FloatingActionButton(
-                  heroTag: 'add_vehicle',
-                  onPressed: _addVehicle,
-                  child: const Icon(Icons.directions_car),
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton(
-                  heroTag: 'add_hazard',
-                  onPressed: _addHazard,
-                  child: const Icon(Icons.warning),
-                ),
-              ],
-            )
-          : null,
-    );
-  }
+        ),
+      ],
+    ),
+    floatingActionButton: isMaster
+        ? Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              FloatingActionButton(
+                heroTag: 'add_vehicle',
+                onPressed: _addVehicle,
+                child: const Icon(Icons.directions_car),
+              ),
+              const SizedBox(height: 10),
+              FloatingActionButton(
+                heroTag: 'add_hazard',
+                onPressed: _addHazard,
+                child: const Icon(Icons.warning),
+              ),
+            ],
+          )
+        : null,
+  );
+}
 }
