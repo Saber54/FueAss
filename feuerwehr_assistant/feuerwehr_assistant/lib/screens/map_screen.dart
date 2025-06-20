@@ -1,22 +1,17 @@
-import 'dart:convert';
-import 'dart:io';
+// screens/map_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_marker_cluster_plus/flutter_map_marker_cluster_plus.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:http/http.dart' as http;
-import 'package:xml/xml.dart' as xml;
-import 'package:path_provider/path_provider.dart';
-import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
-import 'package:flutter_map_marker_cluster_plus/flutter_map_marker_cluster_plus.dart';
 import '../providers/auth_provider.dart';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
-import 'package:flutter/rendering.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
+import '../services/offline_data_manager.dart' as offline;
+import '../services/search_service.dart' as search;
+import '../services/hydrant_service.dart' as hydrant;
+import '../services/pdf_export_service.dart';
+import '../services/tactical_marker_manager.dart';
+import '../services/map_models.dart';
+import '../services/search_result.dart'; // Import the shared model
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -26,112 +21,92 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
+  // Controllers and Keys
   late final MapController _mapController;
-  final List<Marker> _tacticalMarkers = [];
+  final GlobalKey _mapKey = GlobalKey();
+  final TextEditingController _searchController = TextEditingController();
+
+  // Services
+  final offline.OfflineDataManager _offlineManager = offline.OfflineDataManager();
+  final search.SearchService _searchService = search.SearchService();
+  final hydrant.HydrantService _hydrantService = hydrant.HydrantService();
+  final PdfExportService _pdfService = PdfExportService();
+  final TacticalMarkerManager _tacticalManager = TacticalMarkerManager();
+
+  // State
   final List<Marker> _hydrantMarkers = [];
   LatLng? _lastTapPosition;
   bool _showHydrants = false;
-  final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
-  List<Map<String, dynamic>> _searchResults = [];
-  LatLngBounds? _lastLoadedBounds;
-
-  final GlobalKey _mapKey = GlobalKey();
   bool _isCapturing = false;
-  
-  // Offline/Caching Variablen
-  bool _isOfflineMode = false;
   bool _isDownloading = false;
+  bool _isInitialized = false;
   double _downloadProgress = 0.0;
-  String? _offlineDataPath;
-  List<Map<String, dynamic>> _offlineHydrants = [];
-  DateTime? _lastMapUpdate;
-  FMTCStore? _mapStore;
+  List<SearchResult> _searchResults = [];
+  LatLngBounds? _lastLoadedBounds;
+  double _lastLoadedZoom = 0.0;
+
+  // Konstanten für Hydranten-Loading
+  static const double _minZoomForHydrants = 12.0;
+  static const double _boundsExpandFactor = 0.2; // 20% Puffer um sichtbaren Bereich
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
+    
+    // Debounced map movement handling
     _mapController.mapEventStream.listen((event) {
-      if (event is MapEventMove && _showHydrants) {
+      if (event is MapEventMove && _showHydrants && _isInitialized) {
         _handleMapMovement();
       }
     });
-    _initializeOfflineData();
+    
+    // Initialize after the first frame to ensure context is available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeOfflineData();
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _mapController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeOfflineData() async {
+    if (!mounted) return;
+    
     try {
-      // Initialisiere FMTC
-     await FMTCObjectBoxBackend().initialise();
-      _mapStore = FMTCStore('mapCache');
+      await _offlineManager.initialize();
       
-      final appDir = await getApplicationDocumentsDirectory();
-      _offlineDataPath = '${appDir.path}/map_data';
+      // Check if we need to prompt for download regardless of current offline status
+      final shouldPromptDownload = !_offlineManager.hasOfflineData();
       
-      final mapDataDir = Directory(_offlineDataPath!);
-      final hydrantFile = File('${_offlineDataPath!}/hydrants.json');
-      final metaFile = File('${_offlineDataPath!}/meta.json');
-      
-      if (await mapDataDir.exists() && await hydrantFile.exists() && await metaFile.exists()) {
-        // Lade Offline-Daten
-        await _loadOfflineData();
-        
-        // Prüfe auf Updates
-        await _checkForUpdates();
-      } else {
-        // Frage nach Download
+      if (_offlineManager.isOfflineMode && _offlineManager.shouldUpdate()) {
+        await _promptForUpdate();
+      } else if (shouldPromptDownload) {
         await _promptForOfflineDownload();
-      }
-    } catch (e) {
-      debugPrint('Offline data initialization error: $e');
-    }
-  }
-
-  Future<void> _loadOfflineData() async {
-    try {
-      final hydrantFile = File('${_offlineDataPath!}/hydrants.json');
-      final metaFile = File('${_offlineDataPath!}/meta.json');
-      
-      if (await hydrantFile.exists()) {
-        final hydrantData = await hydrantFile.readAsString();
-        _offlineHydrants = List<Map<String, dynamic>>.from(jsonDecode(hydrantData));
-      }
-      
-      if (await metaFile.exists()) {
-        final metaData = await metaFile.readAsString();
-        final meta = jsonDecode(metaData);
-        _lastMapUpdate = DateTime.parse(meta['lastUpdate']);
       }
       
       setState(() {
-        _isOfflineMode = true;
+        _isInitialized = true;
       });
-      
-      // Erstelle Store falls nicht vorhanden
-      if (_mapStore != null && !await _mapStore!.manage.ready) {
-        await _mapStore!.manage.create();
-      }
-      
-      debugPrint('Offline data loaded successfully');
     } catch (e) {
-      debugPrint('Error loading offline data: $e');
-    }
-  }
-
-  Future<void> _checkForUpdates() async {
-    if (_lastMapUpdate == null) return;
-    
-    final daysSinceUpdate = DateTime.now().difference(_lastMapUpdate!).inDays;
-    
-    if (daysSinceUpdate > 30) { // Prüfe monatlich
-      await _promptForUpdate();
+      debugPrint('Error initializing offline data: $e');
+      setState(() {
+        _isInitialized = true;
+      });
     }
   }
 
   Future<void> _promptForOfflineDownload() async {
+    if (!mounted) return;
+    
     final result = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text('Offline-Karten herunterladen'),
         content: const Text(
@@ -157,12 +132,16 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _promptForUpdate() async {
+    if (!mounted) return;
+    
+    final daysSinceUpdate = DateTime.now().difference(_offlineManager.lastMapUpdate!).inDays;
+    
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Kartendaten aktualisieren'),
         content: Text(
-          'Die Kartendaten sind ${DateTime.now().difference(_lastMapUpdate!).inDays} Tage alt. '
+          'Die Kartendaten sind $daysSinceUpdate Tage alt. '
           'Möchten Sie sie aktualisieren?',
         ),
         actions: [
@@ -184,7 +163,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _downloadOfflineData() async {
-    if (_isDownloading) return;
+    if (_isDownloading || !mounted) return;
     
     setState(() {
       _isDownloading = true;
@@ -192,37 +171,26 @@ class _MapScreenState extends State<MapScreen> {
     });
     
     try {
-      // Erstelle Verzeichnis
-      final mapDataDir = Directory(_offlineDataPath!);
-      if (!await mapDataDir.exists()) {
-        await mapDataDir.create(recursive: true);
-      }
-      
-      // Download Hydranten-Daten (Deutschland)
-      setState(() => _downloadProgress = 0.1);
-      await _downloadHydrantData();
-      
-      // Download Karten-Tiles für Deutschland
-      setState(() => _downloadProgress = 0.3);
-      await _downloadMapTiles();
-      
-      // Speichere Metadaten
-      setState(() => _downloadProgress = 0.9);
-      await _saveMetadata();
-      
-      setState(() {
-        _downloadProgress = 1.0;
-        _isOfflineMode = true;
-      });
-      
-      await _loadOfflineData();
+      await _offlineManager.downloadOfflineData(
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() => _downloadProgress = progress);
+          }
+        },
+        onError: (error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Fehler beim Download: $error')),
+            );
+          }
+        },
+      );
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Offline-Daten für Deutschland erfolgreich heruntergeladen!')),
         );
       }
-      
     } catch (e) {
       debugPrint('Download error: $e');
       if (mounted) {
@@ -231,403 +199,84 @@ class _MapScreenState extends State<MapScreen> {
         );
       }
     } finally {
-      setState(() {
-        _isDownloading = false;
-        _downloadProgress = 0.0;
-      });
-    }
-  }
-
-  Future<void> _downloadHydrantData() async {
-    // Deutschland Bounding Box (erweitert für komplette Abdeckung)
-    const double north = 55.1;
-    const double south = 47.2;
-    const double east = 15.1;
-    const double west = 5.8;
-    
-    final overpassQuery = '''
-      [out:json][timeout:600];
-      (
-        node["emergency"="fire_hydrant"]($south,$west,$north,$east);
-        way["emergency"="fire_hydrant"]($south,$west,$north,$east);
-      );
-      out body;
-    ''';
-    
-    final response = await http.get(
-      Uri.parse('https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(overpassQuery)}'),
-    ).timeout(const Duration(minutes: 15));
-    
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final elements = data['elements'] as List;
-      
-      final hydrants = elements.where((element) => element['type'] == 'node').map((node) => {
-        'lat': node['lat'],
-        'lon': node['lon'],
-        'tags': node['tags'] ?? {},
-      }).toList();
-      
-      final hydrantFile = File('${_offlineDataPath!}/hydrants.json');
-      await hydrantFile.writeAsString(jsonEncode(hydrants));
-      
-      debugPrint('Downloaded ${hydrants.length} hydrants for Germany');
-      setState(() => _downloadProgress = 0.7);
-    }
-  }
-
-  Future<void> _downloadMapTiles() async {
-    if (_mapStore == null) return;
-    
-    try {
-      // Erstelle Store falls nicht vorhanden
-      if (!await _mapStore!.manage.ready) {
-        await _mapStore!.manage.create();
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+          _downloadProgress = 0.0;
+        });
       }
-      
-      // Deutschland Bounding Box
-      final region = RectangleRegion(
-        LatLngBounds(
-          const LatLng(55.1, 5.8),  // Nord-West
-          const LatLng(47.2, 15.1), // Süd-Ost
-        ),
-      );
-      
-      final downloadable = region.toDownloadable(
-        minZoom: 6,
-        maxZoom: 14, // Reduziert für schnelleren Download
-        options: TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.firefighter_app',
-        ),
-      );
-
-     
-      // Download mit Progress-Tracking
-      final downloadProgress = _mapStore!.download.startForeground(
-        region: downloadable,
-      );
-      
-      final download = _mapStore!.download.startForeground(
-  region: downloadable,
-);
-
-await for (final progress in download.downloadProgress) {
-  setState(() {
-    _downloadProgress = 0.3 + (progress.percentageProgress / 100) * 0.4;
-  });
-
- if (progress.percentageProgress >= 100) {
-  break;
-}
-
-}
-      
-      debugPrint('Map tiles download completed for Germany');
-    } catch (e) {
-      debugPrint('Map tiles download error: $e');
-      throw e;
     }
-  }
-
-  Future<Uint8List?> _captureMapAsImage() async {
-  try {
-    final RenderRepaintBoundary boundary = 
-        _mapKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-    
-    final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
-    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    
-    return byteData?.buffer.asUint8List();
-  } catch (e) {
-    debugPrint('Error capturing image: $e');
-    return null;
-  }
-}
-
-Future<pw.Document> _createMapPDF(Uint8List imageBytes) async {
-  final pdf = pw.Document();
-  final image = pw.MemoryImage(imageBytes);
-  
-  // Aktuelle Karteninformationen sammeln
-  final camera = _mapController.camera;
-  final center = camera.center;
-  final zoom = camera.zoom;
-  final timestamp = DateTime.now();
-  
-  pdf.addPage(
-    pw.Page(
-      pageFormat: PdfPageFormat.a4,
-      build: (pw.Context context) {
-        return pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            // Header
-            pw.Container(
-              width: double.infinity,
-              padding: const pw.EdgeInsets.all(10),
-              decoration: const pw.BoxDecoration(
-                color: PdfColors.grey200,
-              ),
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    'Feuerwehr Lagekarte',
-                    style: pw.TextStyle(
-                      fontSize: 18,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.SizedBox(height: 5),
-                  pw.Text(
-                    'Erstellt am: ${timestamp.day}.${timestamp.month}.${timestamp.year} um ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')} Uhr',
-                    style: const pw.TextStyle(fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            
-            pw.SizedBox(height: 20),
-            
-            // Kartenausschnitt
-            pw.Expanded(
-              child: pw.Container(
-                width: double.infinity,
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: PdfColors.grey),
-                ),
-                child: pw.Image(image, fit: pw.BoxFit.contain),
-              ),
-            ),
-            
-            pw.SizedBox(height: 20),
-            
-            // Karteninformationen
-            pw.Container(
-              width: double.infinity,
-              padding: const pw.EdgeInsets.all(10),
-              decoration: const pw.BoxDecoration(
-                color: PdfColors.grey100,
-              ),
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    'Karteninformationen:',
-                    style: pw.TextStyle(
-                      fontSize: 14,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.SizedBox(height: 5),
-                  pw.Text('Zentrum: ${center.latitude.toStringAsFixed(6)}, ${center.longitude.toStringAsFixed(6)}'),
-                  pw.Text('Zoom-Level: ${zoom.toStringAsFixed(1)}'),
-                  pw.Text('Modus: ${_isOfflineMode ? "Offline (Deutschland)" : "Online"}'),
-                  if (_showHydrants)
-                    pw.Text('Hydranten: ${_hydrantMarkers.length} angezeigt'),
-                  if (_tacticalMarkers.isNotEmpty)
-                    pw.Text('Taktische Marker: ${_tacticalMarkers.length}'),
-                ],
-              ),
-            ),
-            
-            // Legende
-            if (_showHydrants || _tacticalMarkers.isNotEmpty)
-              pw.Container(
-                width: double.infinity,
-                padding: const pw.EdgeInsets.all(10),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      'Legende:',
-                      style: pw.TextStyle(
-                        fontSize: 14,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    pw.SizedBox(height: 5),
-                    if (_showHydrants)
-                      pw.Row(
-                        children: [
-                          pw.Container(
-                            width: 10,
-                            height: 10,
-                            decoration: const pw.BoxDecoration(
-                              color: PdfColors.red,
-                              shape: pw.BoxShape.circle,
-                            ),
-                          ),
-                          pw.SizedBox(width: 5),
-                          pw.Text('Hydranten'),
-                        ],
-                      ),
-                    if (_tacticalMarkers.isNotEmpty) ...[
-                      pw.SizedBox(height: 3),
-                      pw.Text('🚗 Fahrzeuge (blau)'),
-                      pw.SizedBox(height: 3),
-                      pw.Text('⚠️ Gefahrenstellen (rot)'),
-                    ],
-                  ],
-                ),
-              ),
-          ],
-        );
-      },
-    ),
-  );
-  
-  return pdf;
-}
-
-Future<void> _showPrintDialog(pw.Document pdf) async {
-  final action = await showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Karte exportieren'),
-      content: const Text('Wie möchten Sie die Karte exportieren?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop('cancel'),
-          child: const Text('Abbrechen'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop('share'),
-          child: const Text('Teilen'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.of(context).pop('print'),
-          child: const Text('Drucken'),
-        ),
-      ],
-    ),
-  );
-  
-  if (action == 'print') {
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: 'Feuerwehr_Lagekarte_${DateTime.now().millisecondsSinceEpoch}',
-    );
-  } else if (action == 'share') {
-    final bytes = await pdf.save();
-    final fileName = 'Feuerwehr_Lagekarte_${DateTime.now().millisecondsSinceEpoch}.pdf';
-    
-    await Share.shareXFiles(
-      [XFile.fromData(bytes, name: fileName, mimeType: 'application/pdf')],
-      text: 'Feuerwehr Lagekarte',
-    );
-  }
-}
-
-Future<void> _captureAndPrintMap() async {
-  if (_isCapturing) return;
-  
-  setState(() => _isCapturing = true);
-  
-  try {
-    // Screenshot der Karte erstellen
-    final Uint8List? imageBytes = await _captureMapAsImage();
-    
-    if (imageBytes != null) {
-      // PDF erstellen
-      final pdf = await _createMapPDF(imageBytes);
-      
-      // Druck/Vorschau-Dialog anzeigen
-      await _showPrintDialog(pdf);
-    }
-  } catch (e) {
-    debugPrint('Error capturing map: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Fehler beim Erstellen der Karte: $e')),
-      );
-    }
-  } finally {
-    setState(() => _isCapturing = false);
-  }
-}
-
-  Future<void> _saveMetadata() async {
-    final metaFile = File('${_offlineDataPath!}/meta.json');
-    final metadata = {
-      'lastUpdate': DateTime.now().toIso8601String(),
-      'version': '1.0',
-      'region': 'Germany',
-    };
-    await metaFile.writeAsString(jsonEncode(metadata));
   }
 
   void _handleMapMovement() {
     final camera = _mapController.camera;
+    final currentZoom = camera.zoom;
     final bounds = camera.visibleBounds;
     
-    if (_lastLoadedBounds == null || 
-        !_lastLoadedBounds!.containsBounds(bounds)) {
-      if (_isOfflineMode) {
-        _loadOfflineHydrants(bounds);
-      } else {
-        _loadHydrants(bounds);
+    // Only load hydrants if zoom level is sufficient
+    if (currentZoom < _minZoomForHydrants) {
+      if (_hydrantMarkers.isNotEmpty) {
+        setState(() {
+          _hydrantMarkers.clear();
+          _lastLoadedBounds = null;
+          _lastLoadedZoom = 0.0;
+        });
       }
-      _lastLoadedBounds = bounds;
+      return;
+    }
+    
+    // Check if we need to reload hydrants
+    final shouldReload = _lastLoadedBounds == null ||
+        _lastLoadedZoom != currentZoom ||
+        !_isWithinExpandedBounds(_lastLoadedBounds!, bounds);
+    
+    if (shouldReload) {
+      // Expand bounds for preloading
+      final expandedBounds = _expandBounds(bounds, _boundsExpandFactor);
+      _loadHydrants(expandedBounds);
+      _lastLoadedBounds = expandedBounds;
+      _lastLoadedZoom = currentZoom;
     }
   }
 
-Widget _buildPdfButton() {
-  return Positioned(
-    top: MediaQuery.of(context).padding.top + 10,
-    right: 20,
-    child: FloatingActionButton(
-      heroTag: 'pdf_export',
-      onPressed: _isCapturing ? null : _captureAndPrintMap,
-      backgroundColor: Colors.white,
-      foregroundColor: Colors.black,
-      child: _isCapturing 
-          ? const SizedBox(
-              width: 20, 
-              height: 20, 
-              child: CircularProgressIndicator(strokeWidth: 2)
-            )
-          : const Icon(Icons.picture_as_pdf),
-    ),
-  );
-}
-
-  void _loadOfflineHydrants(LatLngBounds bounds) {
-    setState(() {
-      _hydrantMarkers.clear();
-      for (final hydrant in _offlineHydrants) {
-        final lat = hydrant['lat'] as double;
-        final lon = hydrant['lon'] as double;
-        final point = LatLng(lat, lon);
-        
-        if (bounds.contains(point)) {
-          _hydrantMarkers.add(
-            Marker(
-              width: 20,
-              height: 20,
-              point: point,
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1),
-                ),
-              ),
-            ),
-          );
-        }
-      }
-    });
+  bool _isWithinExpandedBounds(LatLngBounds loadedBounds, LatLngBounds currentBounds) {
+    return loadedBounds.contains(currentBounds.northEast) &&
+           loadedBounds.contains(currentBounds.southWest) &&
+           loadedBounds.contains(currentBounds.northWest) &&
+           loadedBounds.contains(currentBounds.southEast);
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _mapController.dispose();
-    super.dispose();
+  LatLngBounds _expandBounds(LatLngBounds bounds, double factor) {
+    final latDiff = bounds.north - bounds.south;
+    final lngDiff = bounds.east - bounds.west;
+    
+    return LatLngBounds(
+      LatLng(bounds.north + latDiff * factor, bounds.west - lngDiff * factor),
+      LatLng(bounds.south - latDiff * factor, bounds.east + lngDiff * factor),
+    );
+  }
+
+  Future<void> _loadHydrants(LatLngBounds bounds) async {
+    if (!_showHydrants || !_isInitialized) return;
+
+    List<Marker> markers;
+    
+    try {
+      if (_offlineManager.isOfflineMode) {
+        markers = _hydrantService.loadOfflineHydrants(_offlineManager.offlineHydrants, bounds);
+      } else {
+        markers = await _hydrantService.loadOnlineHydrants(bounds);
+      }
+      
+      if (mounted) {
+        setState(() {
+          _hydrantMarkers.clear();
+          _hydrantMarkers.addAll(markers);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading hydrants: $e');
+    }
   }
 
   Future<void> _searchLocation(String query) async {
@@ -637,28 +286,21 @@ Widget _buildPdfButton() {
     }
 
     setState(() => _isSearching = true);
-
+    
     try {
-      // Beschränke Suche auf Deutschland
-      final response = await http.get(
-        Uri.parse('https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeQueryComponent(query)}&countrycodes=de&limit=5'),
-        headers: {'User-Agent': 'FirefighterApp/1.0'},
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as List;
+      final results = await _searchService.searchLocation(query);
+      
+      if (mounted) {
         setState(() {
-          _searchResults = data.map((item) => {
-            'displayName': item['display_name'],
-            'lat': double.parse(item['lat'].toString()),
-            'lon': double.parse(item['lon'].toString()),
-          }).toList();
+          _searchResults = results;
+          _isSearching = false;
         });
       }
     } catch (e) {
       debugPrint('Search error: $e');
-    } finally {
-      setState(() => _isSearching = false);
+      if (mounted) {
+        setState(() => _isSearching = false);
+      }
     }
   }
 
@@ -671,323 +313,335 @@ Widget _buildPdfButton() {
     });
   }
 
-  Future<void> _loadHydrants(LatLngBounds bounds) async {
-    if (!_showHydrants) return;
-
-    try {
-      final overpassQuery = '''
-        [out:xml];
-        (
-          node["emergency"="fire_hydrant"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});
-          way["emergency"="fire_hydrant"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});
-        );
-        out body;
-      ''';
-
-      final response = await http.get(
-        Uri.parse('https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(overpassQuery)}'),
-      ).timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200) {
-        final document = xml.XmlDocument.parse(response.body);
-        final nodes = document.findAllElements('node');
-
-        setState(() {
-          _hydrantMarkers.clear();
-          for (final node in nodes) {
-            final lat = double.tryParse(node.getAttribute('lat') ?? '');
-            final lon = double.tryParse(node.getAttribute('lon') ?? '');
-            if (lat != null && lon != null) {
-              _hydrantMarkers.add(
-                Marker(
-                  width: 20,
-                  height: 20,
-                  point: LatLng(lat, lon),
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1),
-                    ),
-                  ),
-                ),
-              );
-            }
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('Hydrant load error: $e');
-    }
-  }
-
   void _handleMapTap(TapPosition tapPosition, LatLng latlng) {
-    setState(() {
-      _lastTapPosition = latlng;
-    });
+    setState(() => _lastTapPosition = latlng);
   }
 
   void _addVehicle() {
     if (_lastTapPosition == null) return;
-    setState(() {
-      _tacticalMarkers.add(
-        Marker(
-          width: 40,
-          height: 40,
-          point: _lastTapPosition!,
-          child: const Icon(
-            Icons.directions_car,
-            color: Colors.blue,
-            size: 40,
-          ),
-        ),
-      );
-    });
+    _tacticalManager.addVehicle(_lastTapPosition!);
+    setState(() {});
   }
 
   void _addHazard() {
     if (_lastTapPosition == null) return;
-    setState(() {
-      _tacticalMarkers.add(
-        Marker(
-          width: 40,
-          height: 40,
-          point: _lastTapPosition!,
-          child: const Icon(
-            Icons.warning,
-            color: Colors.red,
-            size: 40,
-          ),
-        ),
-      );
-    });
+    _tacticalManager.addHazard(_lastTapPosition!);
+    setState(() {});
   }
 
- @override
-Widget build(BuildContext context) {
-  final isMaster = Provider.of<AuthProvider>(context).isMaster;
-  
-  // Separate Marker-Listen für Clustering
-  final clusterMarkers = [..._tacticalMarkers]; // Nur taktische Marker clustern
+  Future<void> _captureAndPrintMap() async {
+    if (_isCapturing) return;
+    
+    setState(() => _isCapturing = true);
+    
+    try {
+      final imageBytes = await _pdfService.captureMapAsImage(_mapKey);
+      
+      if (imageBytes != null && mounted) {
+        final pdf = _pdfService.createMapPDF(
+          imageBytes,
+          _mapController,
+          _offlineManager.isOfflineMode,
+          _showHydrants,
+          _hydrantMarkers.length,
+          _tacticalManager.count,
+        );
+        
+        await _pdfService.showExportDialog(context, pdf);
+      }
+    } catch (e) {
+      debugPrint('Error capturing map: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fehler beim Erstellen der Karte: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCapturing = false);
+      }
+    }
+  }
 
-  return Scaffold(
-    body: Stack(
-      children: [
-        // A) ÄNDERUNG: RepaintBoundary um die FlutterMap wickeln
-        RepaintBoundary(
-          key: _mapKey,  // <- NEU: GlobalKey hinzufügen
-          child: FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              // Deutschland Zentrum
-              initialCenter: const LatLng(51.1657, 10.4515),
-              initialZoom: 6,
-              // Begrenze auf Deutschland
-              cameraConstraint: CameraConstraint.contain(
-                bounds: LatLngBounds(
-                  const LatLng(55.1, 5.8),  // Nord-West
-                  const LatLng(47.2, 15.1), // Süd-Ost
+  Widget _buildDownloadProgressOverlay() {
+    if (!_isDownloading) return const SizedBox.shrink();
+    
+    return Container(
+      color: Colors.black54,
+      child: Center(
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Lade Deutschland-Karten herunter...',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-              ),
-              onTap: _handleMapTap,
+                const SizedBox(height: 16),
+                LinearProgressIndicator(value: _downloadProgress),
+                const SizedBox(height: 8),
+                Text('${(_downloadProgress * 100).toInt()}%'),
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 10,
+      left: 20,
+      right: 20,
+      child: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(8),
+        child: TextField(
+          controller: _searchController,
+          decoration: InputDecoration(
+            hintText: 'Ort in Deutschland suchen...',
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: _isSearching 
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Padding(
+                      padding: EdgeInsets.all(10),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : null,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide.none,
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(vertical: 0),
+          ),
+          onSubmitted: _searchLocation,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPdfButton() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 70,
+      right: 20,
+      child: FloatingActionButton(
+        heroTag: 'pdf_export',
+        onPressed: _isCapturing ? null : _captureAndPrintMap,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        child: _isCapturing 
+            ? const SizedBox(
+                width: 20, 
+                height: 20, 
+                child: CircularProgressIndicator(strokeWidth: 2)
+              )
+            : const Icon(Icons.picture_as_pdf),
+      ),
+    );
+  }
+
+  Widget _buildSearchResults() {
+    if (_searchResults.isEmpty) return const SizedBox.shrink();
+    
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 60,
+      left: 20,
+      right: 20,
+      child: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          constraints: const BoxConstraints(maxHeight: 200),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _searchResults.length,
+            itemBuilder: (context, index) {
+              final result = _searchResults[index];
+              return ListTile(
+                title: Text(result.displayName),
+                subtitle: result.type.isNotEmpty ? Text(result.type) : null,
+                leading: result.icon != null 
+                    ? Image.network(
+                        result.icon!, 
+                        width: 20, 
+                        height: 20, 
+                        errorBuilder: (_, __, ___) => const Icon(Icons.place)
+                      )
+                    : const Icon(Icons.place),
+                onTap: () => _zoomToLocation(LatLng(result.latitude, result.longitude)),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlPanel() {
+    return Positioned(
+      left: 10,
+      bottom: 10,
+      child: Card(
+        color: Colors.white.withOpacity(0.9),
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Tile layer
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.firefighter_app',
-                tileProvider: (_isOfflineMode && _mapStore != null) 
-                    ? _mapStore!.getTileProvider()
-                    : null,
-              ),
-              
-              // Hydranten-Marker (nicht geclustert)
-              if (_showHydrants)
-                MarkerLayer(markers: _hydrantMarkers),
-              
-              // Taktische Marker (geclustert)
-              if (clusterMarkers.isNotEmpty)
-                MarkerClusterLayerWidget(
-                  options: MarkerClusterLayerOptions(
-                    maxClusterRadius: 60,
-                    size: const Size(40, 40),
-                    alignment: Alignment.center,
-                    markers: clusterMarkers,
-                    builder: (context, markers) {
-                      if (markers.length == 1) {
-                        return markers.first.child;
+              Row(
+                children: [
+                  const Text('Hydranten'),
+                  Switch(
+                    value: _showHydrants,
+                    onChanged: (value) {
+                      setState(() {
+                        _showHydrants = value;
+                        if (!value) {
+                          _hydrantMarkers.clear();
+                          _lastLoadedBounds = null;
+                          _lastLoadedZoom = 0.0;
+                        }
+                      });
+                      
+                      if (value && _isInitialized) {
+                        final camera = _mapController.camera;
+                        if (camera.zoom >= _minZoomForHydrants) {
+                          final bounds = camera.visibleBounds;
+                          _loadHydrants(bounds);
+                        }
                       }
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Center(
-                          child: Text(
-                            markers.length.toString(),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      );
                     },
                   ),
-                ),
-            ],
-          ),
-        ), // <- RepaintBoundary Ende
-        
-        // Download Progress Overlay bleibt unverändert
-        if (_isDownloading)
-          Container(
-            color: Colors.black54,
-            child: Center(
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Lade Deutschland-Karten herunter...',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 16),
-                      LinearProgressIndicator(value: _downloadProgress),
-                      const SizedBox(height: 8),
-                      Text('${(_downloadProgress * 100).toInt()}%'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        
-        // Suchfeld bleibt unverändert
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 10,
-          left: 20,
-          right: 20,
-          child: Material(
-            elevation: 4,
-            borderRadius: BorderRadius.circular(8),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Ort in Deutschland suchen...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _isSearching 
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2)
-                      )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-              ),
-              onSubmitted: _searchLocation,
-            ),
-          ),
-        ),
-        
-        // B) NEU: PDF-Button hinzufügen (nach dem Suchfeld, vor Suchergebnissen)
-        _buildPdfButton(),
-        
-        // Suchergebnisse bleiben unverändert
-        if (_searchResults.isNotEmpty)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 60,
-            left: 20,
-            right: 20,
-            child: Material(
-              elevation: 4,
-              borderRadius: BorderRadius.circular(8),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _searchResults.length,
-                itemBuilder: (context, index) {
-                  final result = _searchResults[index];
-                  return ListTile(
-                    title: Text(result['displayName']),
-                    onTap: () => _zoomToLocation(LatLng(result['lat'], result['lon'])),
-                  );
-                },
-              ),
-            ),
-          ),
-        
-        // Steuerungspanel bleibt unverändert
-        Positioned(
-          left: 10,
-          bottom: 10,
-          child: Card(
-            color: Colors.white.withOpacity(0.9),
-            child: Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      const Text('Hydranten'),
-                      Switch(
-                        value: _showHydrants,
-                        onChanged: (value) {
-                          setState(() => _showHydrants = value);
-                          if (value) {
-                            final camera = _mapController.camera;
-                            final bounds = camera.visibleBounds;
-                            if (_isOfflineMode) {
-                              _loadOfflineHydrants(bounds);
-                            } else {
-                              _loadHydrants(bounds);
-                            }
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  if (_isOfflineMode)
-                    const Row(
-                      children: [
-                        Icon(Icons.offline_bolt, size: 16, color: Colors.green),
-                        SizedBox(width: 4),
-                        Text('Deutschland Offline', style: TextStyle(fontSize: 12)),
-                      ],
-                    ),
                 ],
               ),
-            ),
+              if (_offlineManager.isOfflineMode)
+                const Row(
+                  children: [
+                    Icon(Icons.offline_bolt, size: 16, color: Colors.green),
+                    SizedBox(width: 4),
+                    Text('Deutschland Offline', style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+              if (_showHydrants && _mapController.camera.zoom < _minZoomForHydrants)
+                const Text(
+                  'Zum Anzeigen näher zoomen',
+                  style: TextStyle(fontSize: 10, color: Colors.grey),
+                ),
+            ],
           ),
         ),
-      ],
-    ),
-    floatingActionButton: isMaster
-        ? Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              FloatingActionButton(
-                heroTag: 'add_vehicle',
-                onPressed: _addVehicle,
-                child: const Icon(Icons.directions_car),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isMaster = Provider.of<AuthProvider>(context).isMaster;
+    
+    return Scaffold(
+      body: Stack(
+        children: [
+          // Main Map
+          RepaintBoundary(
+            key: _mapKey,
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: const LatLng(51.1657, 10.4515), // Deutschland Zentrum
+                initialZoom: 6,
+                minZoom: 5,
+                maxZoom: 18,
+                // Erweiterte Grenzen für Deutschland mit mehr Spielraum
+                cameraConstraint: CameraConstraint.contain(
+                  bounds: LatLngBounds(
+                    const LatLng(56.0, 4.0),  // Nord-West (erweitert)
+                    const LatLng(46.0, 16.0), // Süd-Ost (erweitert)
+                  ),
+                ),
+                onTap: _handleMapTap,
               ),
-              const SizedBox(height: 10),
-              FloatingActionButton(
-                heroTag: 'add_hazard',
-                onPressed: _addHazard,
-                child: const Icon(Icons.warning),
-              ),
-            ],
-          )
-        : null,
-  );
-}
+              children: [
+                // Tile Layer
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.firefighter_app',
+                  tileProvider: (_offlineManager.isOfflineMode && _offlineManager.mapStore != null) 
+                      ? _offlineManager.mapStore!.getTileProvider()
+                      : null,
+                ),
+                
+                // Hydranten Marker (nicht geclustert)
+                if (_showHydrants && _hydrantMarkers.isNotEmpty)
+                  MarkerLayer(markers: _hydrantMarkers),
+                
+                // Taktische Marker (geclustert)
+                if (_tacticalManager.markers.isNotEmpty)
+                  MarkerClusterLayerWidget(
+                    options: MarkerClusterLayerOptions(
+                      maxClusterRadius: 60,
+                      size: const Size(40, 40),
+                      alignment: Alignment.center,
+                      markers: _tacticalManager.markers,
+                      builder: (context, markers) {
+                        if (markers.length == 1) {
+                          return markers.first.child;
+                        }
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Center(
+                            child: Text(
+                              markers.length.toString(),
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          
+          // Overlays
+          _buildDownloadProgressOverlay(),
+          _buildSearchField(),
+          _buildPdfButton(),
+          _buildSearchResults(),
+          _buildControlPanel(),
+        ],
+      ),
+      
+      // Floating Action Buttons für Master-Benutzer
+      floatingActionButton: isMaster
+          ? Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'add_vehicle',
+                  onPressed: _addVehicle,
+                  child: const Icon(Icons.directions_car),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton(
+                  heroTag: 'add_hazard',
+                  onPressed: _addHazard,
+                  child: const Icon(Icons.warning),
+                ),
+              ],
+            )
+          : null,
+    );
+  }
 }
