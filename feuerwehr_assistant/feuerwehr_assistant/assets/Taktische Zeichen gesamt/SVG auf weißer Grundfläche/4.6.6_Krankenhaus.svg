@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 90.709 90.709">
+  <!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142)  -->
+  <g id="Grundfläche">
+    <rect x="0" width="90.709" height="90.709" fill="#fff"/>
+  </g>
+  <g id="Flächige_Fülung">
+    <polygon points="45.354 11.338 5.669 27.921 5.669 73.701 85.04 73.701 85.04 27.921 45.354 11.338" fill="#fff"/>
+  </g>
+  <g id="Takt_Zeichen__x28_umgewandelt_x29_">
+    <rect x="44.646" y="28.346" width="1.417" height="45.354"/>
+    <rect x="24.803" y="39.684" width="1.417" height="22.677"/>
+    <rect x="64.489" y="39.684" width="1.417" height="22.677"/>
+    <rect x="5.669" y="50.315" width="79.37" height="1.417"/>
+    <path d="M85.747,74.409H4.96V27.449L45.354,10.57l40.394,16.879v46.96ZM6.377,72.992h77.953V28.393L45.354,12.106,6.377,28.393v44.599Z"/>
+    <rect x="5.669" y="27.637" width="79.37" height="1.417"/>
+  </g>
+</svg>

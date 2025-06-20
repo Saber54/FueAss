@@ -19,6 +19,10 @@ class OfflineDataManager {
   DateTime? get lastMapUpdate => _lastMapUpdate;
   FMTCStore? get mapStore => _mapStore;
 
+  bool hasOfflineData() {
+  return isOfflineMode && _offlineHydrants.isNotEmpty && _lastMapUpdate != null;
+}
+
   Future<void> initialize() async {
     try {
       await FMTCObjectBoxBackend().initialise();

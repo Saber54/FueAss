@@ -10,7 +10,6 @@ import '../services/search_service.dart' as search;
 import '../services/hydrant_service.dart' as hydrant;
 import '../services/pdf_export_service.dart';
 import '../services/tactical_marker_manager.dart';
-import '../services/map_models.dart';
 import '../services/search_result.dart'; // Import the shared model
 
 class MapScreen extends StatefulWidget {
