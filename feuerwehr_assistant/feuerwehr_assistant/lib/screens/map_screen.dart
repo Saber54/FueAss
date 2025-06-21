@@ -231,32 +231,34 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   void _handleMapMovement() {
-    final zoom = _mapController.camera.zoom;
-    final bounds = _mapController.camera.visibleBounds;
-    
-    // Debug-Ausgabe hinzufügen
-    debugPrint('Map moved - Zoom: $zoom, ShowHydrants: $_showHydrants, Initialized: $_isInitialized');
-    
-    if (zoom < _minZoomForHydrants) {
-      if (_hydrantMarkers.isNotEmpty) {
-        debugPrint('Clearing hydrants - zoom too low');
-        setState(() => _hydrantMarkers.clear());
-      }
-      return;
+  final zoom = _mapController.camera.zoom;
+  final bounds = _mapController.camera.visibleBounds;
+  
+  debugPrint('Map moved - Zoom: $zoom, ShowHydrants: $_showHydrants, Initialized: $_isInitialized');
+  debugPrint('Current bounds: $bounds');
+  
+  if (zoom < _minZoomForHydrants) {
+    if (_hydrantMarkers.isNotEmpty) {
+      debugPrint('Clearing hydrants - zoom too low ($zoom < $_minZoomForHydrants)');
+      setState(() => _hydrantMarkers.clear());
     }
-    
-    final shouldReload = _lastLoadedBounds == null ||
-      _lastLoadedZoom != zoom ||
-      !_lastLoadedBounds!.containsBounds(bounds);
-      
-    if (shouldReload) {
-      debugPrint('Reloading hydrants for bounds: $bounds');
-      final expanded = _expandBounds(bounds, _boundsExpandFactor);
-      _loadHydrants(expanded);
-      _lastLoadedBounds = expanded;
-      _lastLoadedZoom = zoom;
-    }
+    return;
   }
+  
+  final shouldReload = _lastLoadedBounds == null ||
+    _lastLoadedZoom != zoom ||
+    !_lastLoadedBounds!.containsBounds(bounds);
+    
+  if (shouldReload) {
+    debugPrint('Reloading hydrants for bounds: $bounds');
+    final expanded = _expandBounds(bounds, _boundsExpandFactor);
+    _loadHydrants(expanded);
+    _lastLoadedBounds = expanded;
+    _lastLoadedZoom = zoom;
+  } else {
+    debugPrint('No reload needed - bounds/zoom unchanged');
+  }
+}
 
   LatLngBounds _expandBounds(LatLngBounds b, double f) {
     final latDiff = b.north - b.south;
@@ -267,30 +269,58 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _loadHydrants(LatLngBounds bounds) async {
-    if (!_showHydrants || !_isInitialized) {
-      debugPrint('Not loading hydrants - ShowHydrants: $_showHydrants, Initialized: $_isInitialized');
-      return;
+ Future<void> _loadHydrants(LatLngBounds bounds) async {
+  if (!_showHydrants || !_isInitialized) {
+    debugPrint('Not loading hydrants - ShowHydrants: $_showHydrants, Initialized: $_isInitialized');
+    return;
+  }
+  
+  try {
+    debugPrint('Loading hydrants for bounds: $bounds');
+    debugPrint('Offline mode: ${_offlineManager.isOfflineMode}');
+    debugPrint('Has offline data: ${_offlineManager.hasOfflineData()}');
+    
+    List<Marker> markers;
+    
+    // Prüfe ob Offline-Daten verfügbar sind UND ob diese auch Hydrantendaten enthalten
+    if (_offlineManager.isOfflineMode && _offlineManager.hasOfflineData()) {
+      markers = _hydrantService.loadOfflineHydrants(_offlineManager.offlineHydrants, bounds);
+      debugPrint('Loaded ${markers.length} offline hydrant markers');
+    } else {
+      // Verwende Online-Daten wenn keine Offline-Daten verfügbar sind
+      markers = await _hydrantService.loadOnlineHydrants(bounds);
+      debugPrint('Loaded ${markers.length} online hydrant markers');
     }
     
-    try {
-      debugPrint('Loading hydrants for bounds: $bounds');
-      final markers = _offlineManager.isOfflineMode
-          ? _hydrantService.loadOfflineHydrants(_offlineManager.offlineHydrants, bounds)
-          : await _hydrantService.loadOnlineHydrants(bounds);
-      
-      debugPrint('Loaded ${markers.length} hydrant markers');
-      
-      if (mounted) {
-        setState(() {
-          _hydrantMarkers.clear();
-          _hydrantMarkers.addAll(markers);
-        });
+    if (mounted) {
+      setState(() {
+        _hydrantMarkers.clear();
+        _hydrantMarkers.addAll(markers);
+      });
+      debugPrint('Updated UI with ${_hydrantMarkers.length} hydrant markers');
+    }
+  } catch (e) {
+    debugPrint('Hydrant load error: $e');
+    debugPrint('Stack trace: ${StackTrace.current}');
+    
+    // Fallback: Versuche Online-Daten zu laden wenn Offline-Laden fehlschlägt
+    if (_offlineManager.isOfflineMode) {
+      debugPrint('Attempting fallback to online data...');
+      try {
+        final markers = await _hydrantService.loadOnlineHydrants(bounds);
+        if (mounted) {
+          setState(() {
+            _hydrantMarkers.clear();
+            _hydrantMarkers.addAll(markers);
+          });
+          debugPrint('Fallback successful: ${_hydrantMarkers.length} online hydrant markers');
+        }
+      } catch (fallbackError) {
+        debugPrint('Fallback also failed: $fallbackError');
       }
-    } catch (e) {
-      debugPrint('Hydrant load error: $e');
     }
   }
+}
 
   void _handleMapTap(TapPosition _, LatLng pos) {
     setState(() => _lastTapPosition = pos);
@@ -820,10 +850,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       : null,
                 ),
                 // Hydrantenmarker - wichtig: diese müssen immer als eigenes MarkerLayer dargestellt werden
-                if (_hydrantMarkers.isNotEmpty) 
-                  MarkerLayer(
-                    markers: _hydrantMarkers,
-                  ),
+               if (_showHydrants) 
+  MarkerLayer(
+    markers: _hydrantMarkers,
+  ),
                 // Taktische Marker als Cluster
                 if (_tacticalManager.markers.isNotEmpty)
                   MarkerClusterLayerWidget(

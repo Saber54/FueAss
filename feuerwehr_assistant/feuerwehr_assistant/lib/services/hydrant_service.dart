@@ -4,13 +4,15 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:xml/xml.dart' as xml;
 import 'package:http/http.dart' as http;
-import 'hydrant_data.dart'; // Import der gemeinsamen HydrantData Klasse
+import 'hydrant_data.dart';
 
 class HydrantService {
   Future<List<Marker>> loadOnlineHydrants(LatLngBounds bounds) async {
     try {
+      debugPrint('Loading online hydrants for bounds: $bounds');
+      
       final overpassQuery = '''
-        [out:xml];
+        [out:xml][timeout:25];
         (
           node["emergency"="fire_hydrant"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});
           way["emergency"="fire_hydrant"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});
@@ -18,24 +20,42 @@ class HydrantService {
         out body;
       ''';
 
+      debugPrint('Overpass query: $overpassQuery');
+
       final response = await http.get(
         Uri.parse('https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(overpassQuery)}'),
+        headers: {
+          'User-Agent': 'FireApp/1.0 (Contact: your-email@example.com)',
+        },
       ).timeout(const Duration(seconds: 30));
+
+      debugPrint('Response status: ${response.statusCode}');
+      debugPrint('Response body length: ${response.body.length}');
 
       if (response.statusCode == 200) {
         final document = xml.XmlDocument.parse(response.body);
         final nodes = document.findAllElements('node');
+        final ways = document.findAllElements('way');
 
-        return _createHydrantMarkers(nodes);
+        debugPrint('Found ${nodes.length} node elements and ${ways.length} way elements');
+
+        final markers = _createHydrantMarkers(nodes);
+        debugPrint('Created ${markers.length} hydrant markers');
+        
+        return markers;
+      } else {
+        debugPrint('HTTP Error: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       debugPrint('Hydrant load error: $e');
+      debugPrint('Stack trace: ${StackTrace.current}');
     }
     
     return [];
   }
 
   List<Marker> loadOfflineHydrants(List<HydrantData> hydrants, LatLngBounds bounds) {
+    debugPrint('Loading offline hydrants. Total hydrants: ${hydrants.length}');
     final markers = <Marker>[];
     
     for (final hydrant in hydrants) {
@@ -45,6 +65,7 @@ class HydrantService {
       }
     }
     
+    debugPrint('Created ${markers.length} offline hydrant markers for bounds');
     return markers;
   }
 
@@ -52,10 +73,19 @@ class HydrantService {
     final markers = <Marker>[];
     
     for (final node in nodes) {
-      final lat = double.tryParse(node.getAttribute('lat') ?? '');
-      final lon = double.tryParse(node.getAttribute('lon') ?? '');
-      if (lat != null && lon != null) {
-        markers.add(_createHydrantMarker(LatLng(lat, lon)));
+      try {
+        final lat = double.tryParse(node.getAttribute('lat') ?? '');
+        final lon = double.tryParse(node.getAttribute('lon') ?? '');
+        
+        if (lat != null && lon != null) {
+          final point = LatLng(lat, lon);
+          markers.add(_createHydrantMarker(point));
+          debugPrint('Added hydrant marker at: $lat, $lon');
+        } else {
+          debugPrint('Invalid coordinates for node: lat=$lat, lon=$lon');
+        }
+      } catch (e) {
+        debugPrint('Error processing node: $e');
       }
     }
     
@@ -64,16 +94,28 @@ class HydrantService {
 
   Marker _createHydrantMarker(LatLng point) {
     return Marker(
-      width: 20,
-      height: 20,
+      width: 24.0, // Größer für bessere Sichtbarkeit
+      height: 24.0,
       point: point,
       child: Container(
-        width: 8,
-        height: 8,
+        width: 24.0,
+        height: 24.0,
         decoration: BoxDecoration(
           color: Colors.red,
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 1),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.water_drop,
+          color: Colors.white,
+          size: 12,
         ),
       ),
     );

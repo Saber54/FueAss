@@ -20,7 +20,17 @@ class OfflineDataManager {
   FMTCStore? get mapStore => _mapStore;
 
   bool hasOfflineData() {
-  return isOfflineMode && _offlineHydrants.isNotEmpty && _lastMapUpdate != null;
+  final hasMapStore = _mapStore != null;
+  final hasHydrants = _offlineHydrants.isNotEmpty;
+  final hasMetadata = _lastMapUpdate != null;
+  
+  debugPrint('Offline data check:');
+  debugPrint('  - Map store: $hasMapStore');
+  debugPrint('  - Hydrants: $hasHydrants (${_offlineHydrants.length} items)');
+  debugPrint('  - Metadata: $hasMetadata ($_lastMapUpdate)');
+  debugPrint('  - Overall: ${hasMapStore && hasHydrants && hasMetadata}');
+  
+  return hasMapStore && hasHydrants && hasMetadata;
 }
 
   Future<void> initialize() async {
