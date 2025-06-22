@@ -4,7 +4,8 @@ import 'map_screen.dart';
 import 'log_screen.dart';
 import 'radio_sketch_screen.dart';
 import 'vehicles_screen.dart';
-import 'settings_screen.dart'; // Neuer Import für Settings
+import 'weather_screen.dart'; // Neuer Import für Weather
+import 'settings_screen.dart';
 
 class MainTabsScreen extends StatefulWidget {
   const MainTabsScreen({super.key});
@@ -20,7 +21,7 @@ class _MainTabsScreenState extends State<MainTabsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this); // Auf 6 Tabs erhöht
+    _tabController = TabController(length: 7, vsync: this); // Auf 7 Tabs erhöht
   }
 
   @override
@@ -43,7 +44,11 @@ class _MainTabsScreenState extends State<MainTabsScreen>
             Tab(icon: Icon(Icons.radio), text: 'Funkskizze'),
             Tab(icon: Icon(Icons.local_shipping), text: 'Fahrzeuge'),
             Tab(icon: Icon(Icons.dangerous), text: 'Gefahrgut'),
-            Tab(icon: Icon(Icons.settings), text: 'Einstellungen'), // Neuer Tab
+            Tab(
+              icon: Icon(Icons.wb_sunny),
+              text: 'Wetter',
+            ), // Neuer Weather Tab
+            Tab(icon: Icon(Icons.settings), text: 'Einstellungen'),
           ],
         ),
       ),
@@ -55,7 +60,8 @@ class _MainTabsScreenState extends State<MainTabsScreen>
           RadioSketchScreen(),
           VehiclesScreen(),
           HazmatScreen(),
-          SettingsScreen(), // Neuer Settings Screen
+          WeatherScreen(), // Neuer Weather Screen
+          SettingsScreen(),
         ],
       ),
     );
