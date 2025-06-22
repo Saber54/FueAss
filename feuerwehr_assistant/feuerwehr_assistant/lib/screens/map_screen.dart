@@ -531,71 +531,76 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildSearchResults() {
-    if (_searchResults.isEmpty) return const SizedBox.shrink();
-    
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 80,
-      left: 16,
-      right: 16,
-      child: Container(
-        constraints: const BoxConstraints(maxHeight: 300),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Material(
-          elevation: 0,
-          borderRadius: BorderRadius.circular(16),
-          child: ListView.separated(
-            shrinkWrap: true,
-            itemCount: _searchResults.length,
-            separatorBuilder: (context, index) => Divider(
-              height: 1,
-              color: Colors.grey[300],
-            ),
-            itemBuilder: (context, index) {
-              final result = _searchResults[index];
-              return ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.place,
-                    color: Theme.of(context).primaryColor,
-                    size: 20,
-                  ),
-                ),
-                title: Text(
-                  result.displayName,
-                  style: const TextStyle(fontWeight: FontWeight.w500),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () {
-                  _mapController.move(
-                    LatLng(result.latitude, result.longitude),
-                    14.5,
-                  );
-                  setState(() {
-                    _searchResults.clear();
-                    _searchController.clear();
-                  });
-                },
-              );
-            },
+  if (_searchResults.isEmpty) return const SizedBox.shrink();
+  
+  return Positioned(
+    top: MediaQuery.of(context).padding.top + 80,
+    left: 16,
+    right: 16,
+    child: Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.4,  // FIXED: Max 40% der Bildschirmhöhe
+      ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
+        ],
+      ),
+      child: Material(
+        elevation: 0,
+        borderRadius: BorderRadius.circular(16),
+        child: ListView.separated(
+          shrinkWrap: true,
+          physics: const ClampingScrollPhysics(),  // FIXED: Bessere Scroll-Physik
+          itemCount: _searchResults.length,
+          separatorBuilder: (context, index) => Divider(
+            height: 1,
+            color: Colors.grey[300],
+          ),
+          itemBuilder: (context, index) {
+            final result = _searchResults[index];
+            return ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.place,
+                  color: Theme.of(context).primaryColor,
+                  size: 20,
+                ),
+              ),
+              title: Text(
+                result.displayName,
+                style: const TextStyle(fontWeight: FontWeight.w500),
+                maxLines: 2,  // FIXED: Begrenze Textzeilen
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                _mapController.move(
+                  LatLng(result.latitude, result.longitude),
+                  14.5,
+                );
+                setState(() {
+                  _searchResults.clear();
+                  _searchController.clear();
+                });
+              },
+            );
+          },
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildHydrantControl() {
     return AnimatedOpacity(
@@ -666,20 +671,25 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildTacticalFAB() {
-    return AnimatedOpacity(
-      opacity: _showControls ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 300),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          // Menü-Optionen
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            height: _showTacticalMenu ? 280 : 0,
-            child: _showTacticalMenu
-                ? Column(
+ Widget _buildTacticalFAB() {
+  return AnimatedOpacity(
+    opacity: _showControls ? 1.0 : 0.0,
+    duration: const Duration(milliseconds: 300),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        // Menü-Optionen - FIXED: Flexible Höhe statt feste Höhe
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          constraints: BoxConstraints(
+            maxHeight: _showTacticalMenu 
+                ? MediaQuery.of(context).size.height * 0.6  // Max 60% der Bildschirmhöhe
+                : 0,
+          ),
+          child: _showTacticalMenu
+              ? SingleChildScrollView(  // FIXED: Scrollbar hinzugefügt
+                  child: Column(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       _buildTacticalOption(
@@ -718,28 +728,29 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 16),
                     ],
-                  )
-                : const SizedBox.shrink(),
-          ),
-          
-          // Haupt-FAB
-          FloatingActionButton(
-            heroTag: 'tactical_main',
-            onPressed: _toggleTacticalMenu,
-            backgroundColor: _showTacticalMenu ? Colors.grey[600] : Theme.of(context).primaryColor,
-            child: AnimatedRotation(
-              turns: _showTacticalMenu ? 0.125 : 0,
-              duration: const Duration(milliseconds: 300),
-              child: Icon(
-                _showTacticalMenu ? Icons.close : Icons.add_location_alt,
-                color: Colors.white,
-              ),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        
+        // Haupt-FAB
+        FloatingActionButton(
+          heroTag: 'tactical_main',
+          onPressed: _toggleTacticalMenu,
+          backgroundColor: _showTacticalMenu ? Colors.grey[600] : Theme.of(context).primaryColor,
+          child: AnimatedRotation(
+            turns: _showTacticalMenu ? 0.125 : 0,
+            duration: const Duration(milliseconds: 300),
+            child: Icon(
+              _showTacticalMenu ? Icons.close : Icons.add_location_alt,
+              color: Colors.white,
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildTacticalOption(String label, IconData icon, Color color, VoidCallback onTap) {
     return Row(
@@ -778,15 +789,20 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildDownloadProgress() {
-    if (!_isDownloading) return const SizedBox.shrink();
-    
-    return Container(
-      color: Colors.black.withOpacity(0.5),
+Widget _buildDownloadProgress() {
+  if (!_isDownloading) return const SizedBox.shrink();
+  
+  return Container(
+    color: Colors.black.withOpacity(0.5),
+    child: SafeArea(  // FIXED: SafeArea hinzugefügt
       child: Center(
         child: Container(
           padding: const EdgeInsets.all(24),
           margin: const EdgeInsets.all(32),
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.3,  // FIXED: Max Höhe
+            maxWidth: MediaQuery.of(context).size.width * 0.8,    // FIXED: Max Breite
+          ),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
@@ -800,13 +816,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 color: Colors.blue,
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Kartendaten werden heruntergeladen...',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
                 ),
                 textAlign: TextAlign.center,
+                maxLines: 2,  // FIXED: Begrenze Textzeilen
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 16),
               LinearProgressIndicator(
@@ -823,8 +841,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
