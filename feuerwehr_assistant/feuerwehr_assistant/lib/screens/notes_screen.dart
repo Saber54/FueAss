@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Note {
   String id;
@@ -32,64 +34,91 @@ class NotesScreen extends StatefulWidget {
   State<NotesScreen> createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen> {
+class _NotesScreenState extends State<NotesScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   List<Note> notes = [];
   Timer? _reminderTimer;
+  late AnimationController _blinkController;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _blinkController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _loadNotes();
     _startReminderTimer();
   }
 
   @override
   void dispose() {
     _reminderTimer?.cancel();
+    _blinkController.dispose();
     super.dispose();
   }
 
-  void _startReminderTimer() {
-    _reminderTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _checkReminders();
-    });
-  }
-
-  void _checkReminders() {
-    bool hasActiveReminder = false;
-    final now = DateTime.now();
-
-    for (var note in notes) {
-      if (note.isReminderActive && !note.hasNotifiedReminder) {
-        bool shouldNotify = false;
-
-        if (note.reminderDateTime != null) {
-          shouldNotify = now.isAfter(note.reminderDateTime!);
-        } else if (note.reminderDuration != null) {
-          final targetTime = note.createdAt.add(note.reminderDuration!);
-          shouldNotify = now.isAfter(targetTime);
-        }
-
-        if (shouldNotify) {
-          hasActiveReminder = true;
-          break;
-        }
-      }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _saveNotes();
     }
-
-    widget.onReminderStatusChanged(hasActiveReminder);
+    if (state == AppLifecycleState.resumed) {
+      _loadNotes();
+    }
   }
 
-  void _acknowledgeReminder(String noteId) {
+  Future<void> _saveNotes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final notesJson =
+        notes
+            .map(
+              (n) => jsonEncode({
+                'id': n.id,
+                'title': n.title,
+                'content': n.content,
+                'createdAt': n.createdAt.toIso8601String(),
+                'reminderDateTime': n.reminderDateTime?.toIso8601String(),
+                'reminderDuration': n.reminderDuration?.inSeconds,
+                'isReminderActive': n.isReminderActive,
+                'hasNotifiedReminder': n.hasNotifiedReminder,
+              }),
+            )
+            .toList();
+    await prefs.setStringList('notes', notesJson);
+  }
+
+  Future<void> _loadNotes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final notesJson = prefs.getStringList('notes') ?? [];
     setState(() {
-      final noteIndex = notes.indexWhere((note) => note.id == noteId);
-      if (noteIndex != -1) {
-        notes[noteIndex].hasNotifiedReminder = true;
-        notes[noteIndex].isReminderActive = false;
-      }
+      notes =
+          notesJson.map((str) {
+            final map = jsonDecode(str);
+            return Note(
+              id: map['id'],
+              title: map['title'],
+              content: map['content'],
+              createdAt: DateTime.parse(map['createdAt']),
+              reminderDateTime:
+                  map['reminderDateTime'] != null
+                      ? DateTime.parse(map['reminderDateTime'])
+                      : null,
+              reminderDuration:
+                  map['reminderDuration'] != null
+                      ? Duration(seconds: map['reminderDuration'])
+                      : null,
+              isReminderActive: map['isReminderActive'] ?? false,
+              hasNotifiedReminder: map['hasNotifiedReminder'] ?? false,
+            );
+          }).toList();
     });
     _checkReminders();
   }
 
+  // Ergänze _saveNotes() nach jeder Änderung:
   void _addNote() {
     showDialog(
       context: context,
@@ -110,6 +139,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   ),
                 );
               });
+              _saveNotes();
               _checkReminders();
             },
           ),
@@ -135,6 +165,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   notes[noteIndex].hasNotifiedReminder = false;
                 }
               });
+              _saveNotes();
               _checkReminders();
             },
           ),
@@ -145,7 +176,61 @@ class _NotesScreenState extends State<NotesScreen> {
     setState(() {
       notes.removeWhere((note) => note.id == noteId);
     });
+    _saveNotes();
     _checkReminders();
+  }
+
+  void _acknowledgeReminder(String noteId) {
+    setState(() {
+      final noteIndex = notes.indexWhere((note) => note.id == noteId);
+      if (noteIndex != -1) {
+        notes[noteIndex].hasNotifiedReminder = true;
+        notes[noteIndex].isReminderActive = false;
+      }
+    });
+    _saveNotes();
+    _checkReminders();
+  }
+
+  void _startReminderTimer() {
+    _reminderTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _checkReminders();
+    });
+  }
+
+  void _checkReminders() {
+    bool hasActiveReminder = false;
+    final now = DateTime.now();
+
+    for (var note in notes) {
+      if (note.isReminderActive && !note.hasNotifiedReminder) {
+        bool shouldNotify = false;
+
+        if (note.reminderDateTime != null) {
+          shouldNotify = now.isAfter(note.reminderDateTime!);
+        } else if (note.reminderDuration != null) {
+          final targetTime = note.createdAt.add(note.reminderDuration!);
+          shouldNotify = now.isAfter(targetTime);
+        }
+
+        if (shouldNotify) {
+          hasActiveReminder = true;
+          // Blinken starten
+          if (!_blinkController.isAnimating) {
+            _blinkController.repeat(reverse: true);
+          }
+          break;
+        }
+      }
+    }
+
+    // Blinken stoppen wenn keine aktiven Erinnerungen vorhanden
+    if (!hasActiveReminder && _blinkController.isAnimating) {
+      _blinkController.stop();
+      _blinkController.reset();
+    }
+
+    widget.onReminderStatusChanged(hasActiveReminder);
   }
 
   bool _isReminderDue(Note note) {
@@ -180,108 +265,144 @@ class _NotesScreenState extends State<NotesScreen> {
                   final note = notes[index];
                   final isReminderDue = _isReminderDue(note);
 
-                  return Card(
-                    color: isReminderDue ? Colors.red.withOpacity(0.1) : null,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 500),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border:
+                  return AnimatedBuilder(
+                    animation: _blinkController,
+                    builder: (context, child) {
+                      return Card(
+                        color:
                             isReminderDue
-                                ? Border.all(color: Colors.red, width: 2)
+                                ? Color.lerp(
+                                  Colors.red.withOpacity(0.1),
+                                  Colors.red.withOpacity(0.3),
+                                  _blinkController.value,
+                                )
                                 : null,
-                      ),
-                      child: ListTile(
-                        title: Text(
-                          note.title,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isReminderDue ? Colors.red : null,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border:
+                                isReminderDue
+                                    ? Border.all(
+                                      color:
+                                          Color.lerp(
+                                            Colors.red,
+                                            Colors.red.withOpacity(0.5),
+                                            _blinkController.value,
+                                          )!,
+                                      width: 2,
+                                    )
+                                    : null,
+                          ),
+                          child: ListTile(
+                            title: Text(
+                              note.title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color:
+                                    isReminderDue
+                                        ? Color.lerp(
+                                          Colors.red,
+                                          Colors.red.withOpacity(0.7),
+                                          _blinkController.value,
+                                        )
+                                        : null,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  note.content,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Erstellt: ${_formatDateTime(note.createdAt)}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                                if (note.isReminderActive)
+                                  Text(
+                                    _getReminderText(note),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color:
+                                          isReminderDue
+                                              ? Color.lerp(
+                                                Colors.red,
+                                                Colors.red.withOpacity(0.7),
+                                                _blinkController.value,
+                                              )
+                                              : Colors.orange,
+                                      fontWeight:
+                                          isReminderDue
+                                              ? FontWeight.bold
+                                              : null,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isReminderDue)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                    ),
+                                    onPressed:
+                                        () => _acknowledgeReminder(note.id),
+                                    tooltip: 'Erinnerung bestätigen',
+                                  ),
+                                PopupMenuButton<String>(
+                                  onSelected: (value) {
+                                    switch (value) {
+                                      case 'edit':
+                                        _editNote(note);
+                                        break;
+                                      case 'delete':
+                                        _deleteNote(note.id);
+                                        break;
+                                    }
+                                  },
+                                  itemBuilder:
+                                      (context) => [
+                                        const PopupMenuItem(
+                                          value: 'edit',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.edit),
+                                              SizedBox(width: 8),
+                                              Text('Bearbeiten'),
+                                            ],
+                                          ),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'delete',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.delete,
+                                                color: Colors.red,
+                                              ),
+                                              SizedBox(width: 8),
+                                              Text('Löschen'),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                ),
+                              ],
+                            ),
+                            onTap: () => _editNote(note),
                           ),
                         ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              note.content,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Erstellt: ${_formatDateTime(note.createdAt)}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            if (note.isReminderActive)
-                              Text(
-                                _getReminderText(note),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color:
-                                      isReminderDue
-                                          ? Colors.red
-                                          : Colors.orange,
-                                  fontWeight:
-                                      isReminderDue ? FontWeight.bold : null,
-                                ),
-                              ),
-                          ],
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (isReminderDue)
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                ),
-                                onPressed: () => _acknowledgeReminder(note.id),
-                                tooltip: 'Erinnerung bestätigen',
-                              ),
-                            PopupMenuButton<String>(
-                              onSelected: (value) {
-                                switch (value) {
-                                  case 'edit':
-                                    _editNote(note);
-                                    break;
-                                  case 'delete':
-                                    _deleteNote(note.id);
-                                    break;
-                                }
-                              },
-                              itemBuilder:
-                                  (context) => [
-                                    const PopupMenuItem(
-                                      value: 'edit',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.edit),
-                                          SizedBox(width: 8),
-                                          Text('Bearbeiten'),
-                                        ],
-                                      ),
-                                    ),
-                                    const PopupMenuItem(
-                                      value: 'delete',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.delete, color: Colors.red),
-                                          SizedBox(width: 8),
-                                          Text('Löschen'),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                            ),
-                          ],
-                        ),
-                        onTap: () => _editNote(note),
-                      ),
-                    ),
+                      );
+                    },
                   );
                 },
               ),
@@ -593,7 +714,7 @@ class _DurationPickerDialogState extends State<_DurationPickerDialog> {
                     DropdownButton<int>(
                       value: _minutes,
                       items:
-                          [0, 15, 30, 45]
+                          List.generate(60, (index) => index) // 0-59 Minuten
                               .map(
                                 (minute) => DropdownMenuItem(
                                   value: minute,
