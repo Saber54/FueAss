@@ -3,6 +3,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/search_service.dart';
+import '../services/search_result.dart';
 
 class WeatherScreen extends StatefulWidget {
   const WeatherScreen({super.key});
@@ -26,7 +29,8 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   // Für Ortssuche
   final TextEditingController _searchController = TextEditingController();
-  List<LocationResult> _searchResults = [];
+  final SearchService _searchService = SearchService();
+  List<SearchResult> _searchResults = [];
   // ignore: unused_field
   bool _isSearching = false;
   Timer? _searchTimer;
@@ -34,6 +38,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
   @override
   void initState() {
     super.initState();
+    _loadLastLocation();
     _fetchWeatherData();
     _startPeriodicRefresh();
   }
@@ -53,6 +58,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
   }
 
   Future<void> _searchLocation(String query) async {
+    print('Suche: $query'); // Debug
     if (query.isEmpty) {
       setState(() {
         _searchResults = [];
@@ -62,56 +68,27 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
     _searchTimer?.cancel();
     _searchTimer = Timer(const Duration(milliseconds: 500), () async {
-      try {
-        setState(() {
-          _isSearching = true;
-        });
-
-        final url = Uri.parse(
-          'https://geocoding-api.open-meteo.com/v1/search?name=$query&count=10&language=de&format=json',
-        );
-
-        final response = await http
-            .get(url)
-            .timeout(const Duration(seconds: 5));
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          final results = data['results'] as List<dynamic>? ?? [];
-
-          setState(() {
-            _searchResults =
-                results
-                    .map(
-                      (result) => LocationResult(
-                        name: result['name'] ?? '',
-                        country: result['country'] ?? '',
-                        admin1: result['admin1'] ?? '',
-                        latitude: result['latitude']?.toDouble() ?? 0.0,
-                        longitude: result['longitude']?.toDouble() ?? 0.0,
-                      ),
-                    )
-                    .toList();
-            _isSearching = false;
-          });
-        }
-      } catch (e) {
-        setState(() {
-          _isSearching = false;
-          _searchResults = [];
-        });
-      }
+      setState(() {
+        _isSearching = true;
+      });
+      final results = await _searchService.searchLocation(query);
+      print('Suchergebnisse: $results'); // <--- Debug-Ausgabe
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
     });
   }
 
-  void _selectLocation(LocationResult location) {
+  void _selectLocation(SearchResult location) {
     setState(() {
       _latitude = location.latitude;
       _longitude = location.longitude;
-      _currentLocation = '${location.name}, ${location.country}';
+      _currentLocation = location.displayName;
       _searchResults = [];
       _searchController.clear();
     });
+    _saveLastLocation();
     _fetchWeatherData();
   }
 
@@ -123,7 +100,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
       });
 
       final url = Uri.parse(
-        'https://api.open-meteo.com/v1/forecast?latitude=$_latitude&longitude=$_longitude&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m&timezone=auto&forecast_days=2',
+        'https://api.open-meteo.com/v1/forecast?latitude=$_latitude&longitude=$_longitude&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m,shortwave_radiation&timezone=auto&forecast_days=2',
       );
 
       final response = await http.get(url).timeout(const Duration(seconds: 10));
@@ -155,6 +132,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
                 windDirection:
                     hourlyData['wind_direction_10m'][i]?.toInt() ?? 0,
                 windGusts: hourlyData['wind_gusts_10m'][i]?.toDouble() ?? 0.0,
+                solarRadiation:
+                    hourlyData['shortwave_radiation']?[i]?.toDouble() ??
+                    0.0, // NEU
               ),
             );
             hoursAdded++;
@@ -180,57 +160,78 @@ class _WeatherScreenState extends State<WeatherScreen> {
     }
   }
 
+  Future<void> _saveLastLocation() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('weather_latitude', _latitude);
+    await prefs.setDouble('weather_longitude', _longitude);
+    await prefs.setString('weather_location', _currentLocation);
+  }
+
+  Future<void> _loadLastLocation() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lat = prefs.getDouble('weather_latitude');
+    final lon = prefs.getDouble('weather_longitude');
+    final loc = prefs.getString('weather_location');
+    if (lat != null && lon != null && loc != null) {
+      setState(() {
+        _latitude = lat;
+        _longitude = lon;
+        _currentLocation = loc;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Column(
+      body: Stack(
         children: [
-          // Header mit Ortssuche
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).primaryColor.withOpacity(0.1),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _currentLocation,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          if (_lastUpdated.isNotEmpty)
-                            Text(
-                              'Letzte Aktualisierung: $_lastUpdated',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _fetchWeatherData,
-                      icon: const Icon(Icons.refresh),
-                      tooltip: 'Aktualisieren',
+          // Wetter-UI im Hintergrund
+          Column(
+            children: [
+              // Header mit Ortssuche
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                // Suchfeld
-                Stack(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _currentLocation,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+                              if (_lastUpdated.isNotEmpty)
+                                Text(
+                                  'Letzte Aktualisierung: $_lastUpdated',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _fetchWeatherData,
+                          icon: const Icon(Icons.refresh),
+                          tooltip: 'Aktualisieren',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _searchController,
                       decoration: InputDecoration(
@@ -256,42 +257,40 @@ class _WeatherScreenState extends State<WeatherScreen> {
                       ),
                       onChanged: _searchLocation,
                     ),
-                    // Suchergebnisse
-                    if (_searchResults.isNotEmpty)
-                      Positioned(
-                        top: 56,
-                        left: 0,
-                        right: 0,
-                        child: Material(
-                          elevation: 8,
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            constraints: const BoxConstraints(maxHeight: 200),
-                            child: ListView.builder(
-                              shrinkWrap: true,
-                              itemCount: _searchResults.length,
-                              itemBuilder: (context, index) {
-                                final result = _searchResults[index];
-                                return ListTile(
-                                  leading: const Icon(Icons.location_on),
-                                  title: Text(result.name),
-                                  subtitle: Text(
-                                    '${result.admin1}, ${result.country}',
-                                  ),
-                                  onTap: () => _selectLocation(result),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              // Wetter Content
+              Expanded(child: _buildWeatherContent()),
+            ],
           ),
-          // Wetter Content
-          Expanded(child: _buildWeatherContent()),
+          // Vorschlagsliste als Overlay
+          if (_searchResults.isNotEmpty)
+            Positioned(
+              // Passe top ggf. an, je nach Höhe deines Headers
+              top: 110, // Höhe des Headers + Padding
+              left: 16,
+              right: 16,
+              child: Material(
+                elevation: 8,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) {
+                      final result = _searchResults[index];
+                      return ListTile(
+                        leading: const Icon(Icons.location_on),
+                        title: Text(result.displayName),
+                        onTap: () => _selectLocation(result),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -621,16 +620,16 @@ class WeatherDetailCard extends StatelessWidget {
                     context,
                     Icons.air,
                     'Wind',
-                    '${weather.windSpeed.toStringAsFixed(0)} km/h',
+                    '${weather.windSpeed.toStringAsFixed(0)} km/h\n${_getWindDirection(weather.windDirection)}',
                     Colors.green,
                   ),
                 ),
                 Expanded(
                   child: _buildInfoItem(
                     context,
-                    Icons.navigation,
-                    'Richtung',
-                    _getWindDirection(weather.windDirection),
+                    Icons.wb_sunny,
+                    'Sonne',
+                    '${weather.solarRadiation.toStringAsFixed(0)} W/m²',
                     Colors.orange,
                   ),
                 ),
@@ -757,22 +756,6 @@ class WeatherDetailCard extends StatelessWidget {
   }
 }
 
-class LocationResult {
-  final String name;
-  final String country;
-  final String admin1;
-  final double latitude;
-  final double longitude;
-
-  LocationResult({
-    required this.name,
-    required this.country,
-    required this.admin1,
-    required this.latitude,
-    required this.longitude,
-  });
-}
-
 class HourlyWeather {
   final DateTime time;
   final double temperature;
@@ -783,6 +766,7 @@ class HourlyWeather {
   final double windSpeed;
   final int windDirection;
   final double windGusts;
+  final double solarRadiation;
 
   HourlyWeather({
     required this.time,
@@ -794,5 +778,6 @@ class HourlyWeather {
     required this.windSpeed,
     required this.windDirection,
     required this.windGusts,
+    required this.solarRadiation,
   });
 }
