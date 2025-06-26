@@ -29,7 +29,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   late AnimationController _fabAnimationController;
   late AnimationController _searchAnimationController;
 
-  final offline.OfflineDataManager _offlineManager = offline.OfflineDataManager();
+  final offline.OfflineDataManager _offlineManager =
+      offline.OfflineDataManager();
   final search.SearchService _searchService = search.SearchService();
   final hydrant.HydrantService _hydrantService = hydrant.HydrantService();
   final PdfExportService _pdfService = PdfExportService();
@@ -65,7 +66,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 200),
       vsync: this,
     );
-    
+
     _mapController.mapEventStream.listen((event) {
       if (_showHydrants && _isInitialized) {
         _handleMapMovement();
@@ -90,7 +91,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     try {
       // Initialisiere Tactical Symbol Service
       await _tacticalSymbolService.initialize();
-      
+
       // Initialisiere Offline Data Manager
       await _offlineManager.initialize();
       final shouldPromptDownload = !_offlineManager.hasOfflineData();
@@ -100,7 +101,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         await _promptForOfflineDownload();
       }
       setState(() => _isInitialized = true);
-      
+
       // Lade Hydranten nach Initialisierung, falls bereits aktiviert
       if (_showHydrants) {
         _handleMapMovement();
@@ -115,44 +116,49 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.cloud_download_outlined,
-                color: Theme.of(context).primaryColor,
-              ),
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-            const SizedBox(width: 12),
-            const Text('Offline-Karten'),
-          ],
-        ),
-        content: const Text(
-          'Möchten Sie die Kartendaten für Deutschland offline speichern? Dies ermöglicht die Nutzung ohne Internetverbindung.',
-          style: TextStyle(fontSize: 16),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Später'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.download),
-            label: const Text('Herunterladen'),
-            style: ElevatedButton.styleFrom(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.cloud_download_outlined,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Text('Offline-Karten'),
+              ],
             ),
+            content: const Text(
+              'Möchten Sie die Kartendaten für Deutschland offline speichern? Dies ermöglicht die Nutzung ohne Internetverbindung.',
+              style: TextStyle(fontSize: 16),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Später'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, true),
+                icon: const Icon(Icons.download),
+                label: const Text('Herunterladen'),
+                style: ElevatedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
     );
     if (result == true) await _downloadOfflineData();
   }
@@ -160,43 +166,48 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Future<void> _promptForUpdate() async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.update, color: Colors.orange),
+                ),
+                const SizedBox(width: 12),
+                const Text('Update verfügbar'),
+              ],
+            ),
+            content: const Text(
+              'Kartendaten sind älter als 30 Tage. Möchten Sie diese jetzt aktualisieren?',
+              style: TextStyle(fontSize: 16),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Später'),
               ),
-              child: const Icon(Icons.update, color: Colors.orange),
-            ),
-            const SizedBox(width: 12),
-            const Text('Update verfügbar'),
-          ],
-        ),
-        content: const Text(
-          'Kartendaten sind älter als 30 Tage. Möchten Sie diese jetzt aktualisieren?',
-          style: TextStyle(fontSize: 16),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Später'),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, true),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Aktualisieren'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ],
           ),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.refresh),
-            label: const Text('Aktualisieren'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-          ),
-        ],
-      ),
     );
     if (result == true) await _downloadOfflineData();
   }
@@ -221,7 +232,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
         );
       }
@@ -231,34 +244,39 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   void _handleMapMovement() {
-  final zoom = _mapController.camera.zoom;
-  final bounds = _mapController.camera.visibleBounds;
-  
-  debugPrint('Map moved - Zoom: $zoom, ShowHydrants: $_showHydrants, Initialized: $_isInitialized');
-  debugPrint('Current bounds: $bounds');
-  
-  if (zoom < _minZoomForHydrants) {
-    if (_hydrantMarkers.isNotEmpty) {
-      debugPrint('Clearing hydrants - zoom too low ($zoom < $_minZoomForHydrants)');
-      setState(() => _hydrantMarkers.clear());
+    final zoom = _mapController.camera.zoom;
+    final bounds = _mapController.camera.visibleBounds;
+
+    debugPrint(
+      'Map moved - Zoom: $zoom, ShowHydrants: $_showHydrants, Initialized: $_isInitialized',
+    );
+    debugPrint('Current bounds: $bounds');
+
+    if (zoom < _minZoomForHydrants) {
+      if (_hydrantMarkers.isNotEmpty) {
+        debugPrint(
+          'Clearing hydrants - zoom too low ($zoom < $_minZoomForHydrants)',
+        );
+        setState(() => _hydrantMarkers.clear());
+      }
+      return;
     }
-    return;
+
+    final shouldReload =
+        _lastLoadedBounds == null ||
+        _lastLoadedZoom != zoom ||
+        !_lastLoadedBounds!.containsBounds(bounds);
+
+    if (shouldReload) {
+      debugPrint('Reloading hydrants for bounds: $bounds');
+      final expanded = _expandBounds(bounds, _boundsExpandFactor);
+      _loadHydrants(expanded);
+      _lastLoadedBounds = expanded;
+      _lastLoadedZoom = zoom;
+    } else {
+      debugPrint('No reload needed - bounds/zoom unchanged');
+    }
   }
-  
-  final shouldReload = _lastLoadedBounds == null ||
-    _lastLoadedZoom != zoom ||
-    !_lastLoadedBounds!.containsBounds(bounds);
-    
-  if (shouldReload) {
-    debugPrint('Reloading hydrants for bounds: $bounds');
-    final expanded = _expandBounds(bounds, _boundsExpandFactor);
-    _loadHydrants(expanded);
-    _lastLoadedBounds = expanded;
-    _lastLoadedZoom = zoom;
-  } else {
-    debugPrint('No reload needed - bounds/zoom unchanged');
-  }
-}
 
   LatLngBounds _expandBounds(LatLngBounds b, double f) {
     final latDiff = b.north - b.south;
@@ -269,58 +287,65 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
- Future<void> _loadHydrants(LatLngBounds bounds) async {
-  if (!_showHydrants || !_isInitialized) {
-    debugPrint('Not loading hydrants - ShowHydrants: $_showHydrants, Initialized: $_isInitialized');
-    return;
-  }
-  
-  try {
-    debugPrint('Loading hydrants for bounds: $bounds');
-    debugPrint('Offline mode: ${_offlineManager.isOfflineMode}');
-    debugPrint('Has offline data: ${_offlineManager.hasOfflineData()}');
-    
-    List<Marker> markers;
-    
-    // Prüfe ob Offline-Daten verfügbar sind UND ob diese auch Hydrantendaten enthalten
-    if (_offlineManager.isOfflineMode && _offlineManager.hasOfflineData()) {
-      markers = _hydrantService.loadOfflineHydrants(_offlineManager.offlineHydrants, bounds);
-      debugPrint('Loaded ${markers.length} offline hydrant markers');
-    } else {
-      // Verwende Online-Daten wenn keine Offline-Daten verfügbar sind
-      markers = await _hydrantService.loadOnlineHydrants(bounds);
-      debugPrint('Loaded ${markers.length} online hydrant markers');
+  Future<void> _loadHydrants(LatLngBounds bounds) async {
+    if (!_showHydrants || !_isInitialized) {
+      debugPrint(
+        'Not loading hydrants - ShowHydrants: $_showHydrants, Initialized: $_isInitialized',
+      );
+      return;
     }
-    
-    if (mounted) {
-      setState(() {
-        _hydrantMarkers.clear();
-        _hydrantMarkers.addAll(markers);
-      });
-      debugPrint('Updated UI with ${_hydrantMarkers.length} hydrant markers');
-    }
-  } catch (e) {
-    debugPrint('Hydrant load error: $e');
-    debugPrint('Stack trace: ${StackTrace.current}');
-    
-    // Fallback: Versuche Online-Daten zu laden wenn Offline-Laden fehlschlägt
-    if (_offlineManager.isOfflineMode) {
-      debugPrint('Attempting fallback to online data...');
-      try {
-        final markers = await _hydrantService.loadOnlineHydrants(bounds);
-        if (mounted) {
-          setState(() {
-            _hydrantMarkers.clear();
-            _hydrantMarkers.addAll(markers);
-          });
-          debugPrint('Fallback successful: ${_hydrantMarkers.length} online hydrant markers');
+
+    try {
+      debugPrint('Loading hydrants for bounds: $bounds');
+      debugPrint('Offline mode: ${_offlineManager.isOfflineMode}');
+      debugPrint('Has offline data: ${_offlineManager.hasOfflineData()}');
+
+      List<Marker> markers;
+
+      // Prüfe ob Offline-Daten verfügbar sind UND ob diese auch Hydrantendaten enthalten
+      if (_offlineManager.isOfflineMode && _offlineManager.hasOfflineData()) {
+        markers = _hydrantService.loadOfflineHydrants(
+          _offlineManager.offlineHydrants,
+          bounds,
+        );
+        debugPrint('Loaded ${markers.length} offline hydrant markers');
+      } else {
+        // Verwende Online-Daten wenn keine Offline-Daten verfügbar sind
+        markers = await _hydrantService.loadOnlineHydrants(bounds);
+        debugPrint('Loaded ${markers.length} online hydrant markers');
+      }
+
+      if (mounted) {
+        setState(() {
+          _hydrantMarkers.clear();
+          _hydrantMarkers.addAll(markers);
+        });
+        debugPrint('Updated UI with ${_hydrantMarkers.length} hydrant markers');
+      }
+    } catch (e) {
+      debugPrint('Hydrant load error: $e');
+      debugPrint('Stack trace: ${StackTrace.current}');
+
+      // Fallback: Versuche Online-Daten zu laden wenn Offline-Laden fehlschlägt
+      if (_offlineManager.isOfflineMode) {
+        debugPrint('Attempting fallback to online data...');
+        try {
+          final markers = await _hydrantService.loadOnlineHydrants(bounds);
+          if (mounted) {
+            setState(() {
+              _hydrantMarkers.clear();
+              _hydrantMarkers.addAll(markers);
+            });
+            debugPrint(
+              'Fallback successful: ${_hydrantMarkers.length} online hydrant markers',
+            );
+          }
+        } catch (fallbackError) {
+          debugPrint('Fallback also failed: $fallbackError');
         }
-      } catch (fallbackError) {
-        debugPrint('Fallback also failed: $fallbackError');
       }
     }
   }
-}
 
   void _handleMapTap(TapPosition _, LatLng pos) {
     setState(() => _lastTapPosition = pos);
@@ -349,20 +374,22 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   void _showTacticalSymbolPicker(TacticalSymbolCategory category) {
     setState(() => _showTacticalMenu = false);
     _fabAnimationController.reverse();
-    
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        builder: (context, scrollController) => TacticalSymbolPicker(
-          category: category,
-          onSymbolSelected: _addTacticalSymbol,
-        ),
-      ),
+      builder:
+          (context) => DraggableScrollableSheet(
+            initialChildSize: 0.6,
+            minChildSize: 0.4,
+            maxChildSize: 0.9,
+            builder:
+                (context, scrollController) => TacticalSymbolPicker(
+                  category: category,
+                  onSymbolSelected: _addTacticalSymbol,
+                ),
+          ),
     );
   }
 
@@ -401,7 +428,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
 
     setState(() {});
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -487,28 +514,29 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   color: Theme.of(context).primaryColor,
                 ),
               ),
-              suffixIcon: _isSearching
-                  ? Container(
-                      padding: const EdgeInsets.all(12),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Theme.of(context).primaryColor,
+              suffixIcon:
+                  _isSearching
+                      ? Container(
+                        padding: const EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Theme.of(context).primaryColor,
+                            ),
                           ),
                         ),
-                      ),
-                    )
-                  : _searchController.text.isNotEmpty
+                      )
+                      : _searchController.text.isNotEmpty
                       ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() => _searchResults.clear());
-                          },
-                        )
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchResults.clear());
+                        },
+                      )
                       : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -516,7 +544,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+              contentPadding: const EdgeInsets.symmetric(
+                vertical: 16,
+                horizontal: 8,
+              ),
             ),
             onSubmitted: _searchLocation,
             onChanged: (value) {
@@ -531,76 +562,77 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildSearchResults() {
-  if (_searchResults.isEmpty) return const SizedBox.shrink();
-  
-  return Positioned(
-    top: MediaQuery.of(context).padding.top + 80,
-    left: 16,
-    right: 16,
-    child: Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.4,  // FIXED: Max 40% der Bildschirmhöhe
-      ),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Material(
-        elevation: 0,
-        borderRadius: BorderRadius.circular(16),
-        child: ListView.separated(
-          shrinkWrap: true,
-          physics: const ClampingScrollPhysics(),  // FIXED: Bessere Scroll-Physik
-          itemCount: _searchResults.length,
-          separatorBuilder: (context, index) => Divider(
-            height: 1,
-            color: Colors.grey[300],
-          ),
-          itemBuilder: (context, index) {
-            final result = _searchResults[index];
-            return ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).primaryColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+    if (_searchResults.isEmpty) return const SizedBox.shrink();
+
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 80,
+      left: 16,
+      right: 16,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight:
+              MediaQuery.of(context).size.height *
+              0.4, // FIXED: Max 40% der Bildschirmhöhe
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Material(
+          elevation: 0,
+          borderRadius: BorderRadius.circular(16),
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics:
+                const ClampingScrollPhysics(), // FIXED: Bessere Scroll-Physik
+            itemCount: _searchResults.length,
+            separatorBuilder:
+                (context, index) => Divider(height: 1, color: Colors.grey[300]),
+            itemBuilder: (context, index) {
+              final result = _searchResults[index];
+              return ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.place,
+                    color: Theme.of(context).primaryColor,
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  Icons.place,
-                  color: Theme.of(context).primaryColor,
-                  size: 20,
+                title: Text(
+                  result.displayName,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  maxLines: 2, // FIXED: Begrenze Textzeilen
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              title: Text(
-                result.displayName,
-                style: const TextStyle(fontWeight: FontWeight.w500),
-                maxLines: 2,  // FIXED: Begrenze Textzeilen
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: () {
-                _mapController.move(
-                  LatLng(result.latitude, result.longitude),
-                  14.5,
-                );
-                setState(() {
-                  _searchResults.clear();
-                  _searchController.clear();
-                });
-              },
-            );
-          },
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  _mapController.move(
+                    LatLng(result.latitude, result.longitude),
+                    14.5,
+                  );
+                  setState(() {
+                    _searchResults.clear();
+                    _searchController.clear();
+                  });
+                },
+              );
+            },
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildHydrantControl() {
     return AnimatedOpacity(
@@ -608,7 +640,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 300),
       child: Container(
         margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 8,
+        ), // FIXED: Weniger Padding
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -620,139 +655,168 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
           ],
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _showHydrants 
-                    ? Theme.of(context).primaryColor.withOpacity(0.1)
-                    : Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+        child: IntrinsicWidth(
+          // FIXED: Nur so breit wie nötig
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color:
+                      _showHydrants
+                          ? Theme.of(context).primaryColor.withOpacity(0.1)
+                          : Colors.grey.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.water_drop,
+                  color:
+                      _showHydrants
+                          ? Theme.of(context).primaryColor
+                          : Colors.grey[600],
+                  size: 20,
+                ),
               ),
-              child: Icon(
-                Icons.water_drop,
-                color: _showHydrants 
-                    ? Theme.of(context).primaryColor 
-                    : Colors.grey[600],
-                size: 20,
+              const SizedBox(width: 8), // FIXED: Weniger Abstand
+              Flexible(
+                // FIXED: Flexible Text
+                child: Text(
+                  'Hydranten',
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            const Text(
-              'Hydranten',
-              style: TextStyle(fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(width: 8),
-            Switch(
-              value: _showHydrants,
-              onChanged: (value) {
-                setState(() {
-                  _showHydrants = value;
-                  _hydrantMarkers.clear();
-                  _lastLoadedBounds = null;
-                  _lastLoadedZoom = 0.0;
-                });
-                
-                // Sofort nach dem Aktivieren prüfen und laden
-                if (value && _isInitialized) {
-                  // Kurze Verzögerung, damit setState Zeit hat zu wirken
-                  Future.delayed(const Duration(milliseconds: 100), () {
-                    _handleMapMovement();
+              const SizedBox(width: 8),
+              Switch(
+                value: _showHydrants,
+                onChanged: (value) {
+                  setState(() {
+                    _showHydrants = value;
+                    _hydrantMarkers.clear();
+                    _lastLoadedBounds = null;
+                    _lastLoadedZoom = 0.0;
                   });
-                }
-              },
-              activeColor: Theme.of(context).primaryColor,
-            ),
-          ],
+
+                  if (value && _isInitialized) {
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      _handleMapMovement();
+                    });
+                  }
+                },
+                activeColor: Theme.of(context).primaryColor,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
- Widget _buildTacticalFAB() {
-  return AnimatedOpacity(
-    opacity: _showControls ? 1.0 : 0.0,
-    duration: const Duration(milliseconds: 300),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        // Menü-Optionen - FIXED: Flexible Höhe statt feste Höhe
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          constraints: BoxConstraints(
-            maxHeight: _showTacticalMenu 
-                ? MediaQuery.of(context).size.height * 0.6  // Max 60% der Bildschirmhöhe
-                : 0,
-          ),
-          child: _showTacticalMenu
-              ? SingleChildScrollView(  // FIXED: Scrollbar hinzugefügt
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      _buildTacticalOption(
-                        'Fahrzeuge',
-                        Icons.directions_car,
-                        Colors.green,
-                        () => _showTacticalSymbolPicker(TacticalSymbolCategory.vehicle),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildTacticalOption(
-                        'Gefahren',
-                        Icons.warning,
-                        Colors.red,
-                        () => _showTacticalSymbolPicker(TacticalSymbolCategory.hazard),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildTacticalOption(
-                        'Ausrüstung',
-                        Icons.build,
-                        Colors.blue,
-                        () => _showTacticalSymbolPicker(TacticalSymbolCategory.equipment),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildTacticalOption(
-                        'Personal',
-                        Icons.person,
-                        Colors.purple,
-                        () => _showTacticalSymbolPicker(TacticalSymbolCategory.personnel),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildTacticalOption(
-                        'Infrastruktur',
-                        Icons.business,
-                        Colors.brown,
-                        () => _showTacticalSymbolPicker(TacticalSymbolCategory.infrastructure),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                  ),
-                )
-              : const SizedBox.shrink(),
-        ),
-        
-        // Haupt-FAB
-        FloatingActionButton(
-          heroTag: 'tactical_main',
-          onPressed: _toggleTacticalMenu,
-          backgroundColor: _showTacticalMenu ? Colors.grey[600] : Theme.of(context).primaryColor,
-          child: AnimatedRotation(
-            turns: _showTacticalMenu ? 0.125 : 0,
+  Widget _buildTacticalFAB() {
+    return AnimatedOpacity(
+      opacity: _showControls ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 300),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          // Menü-Optionen - FIXED: Flexible Höhe statt feste Höhe
+          AnimatedContainer(
             duration: const Duration(milliseconds: 300),
-            child: Icon(
-              _showTacticalMenu ? Icons.close : Icons.add_location_alt,
-              color: Colors.white,
+            curve: Curves.easeInOut,
+            constraints: BoxConstraints(
+              maxHeight:
+                  _showTacticalMenu
+                      ? MediaQuery.of(context).size.height *
+                          0.6 // Max 60% der Bildschirmhöhe
+                      : 0,
+            ),
+            child:
+                _showTacticalMenu
+                    ? SingleChildScrollView(
+                      // FIXED: Scrollbar hinzugefügt
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          _buildTacticalOption(
+                            'Fahrzeuge',
+                            Icons.directions_car,
+                            Colors.green,
+                            () => _showTacticalSymbolPicker(
+                              TacticalSymbolCategory.vehicle,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildTacticalOption(
+                            'Gefahren',
+                            Icons.warning,
+                            Colors.red,
+                            () => _showTacticalSymbolPicker(
+                              TacticalSymbolCategory.hazard,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildTacticalOption(
+                            'Ausrüstung',
+                            Icons.build,
+                            Colors.blue,
+                            () => _showTacticalSymbolPicker(
+                              TacticalSymbolCategory.equipment,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildTacticalOption(
+                            'Personal',
+                            Icons.person,
+                            Colors.purple,
+                            () => _showTacticalSymbolPicker(
+                              TacticalSymbolCategory.personnel,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildTacticalOption(
+                            'Infrastruktur',
+                            Icons.business,
+                            Colors.brown,
+                            () => _showTacticalSymbolPicker(
+                              TacticalSymbolCategory.infrastructure,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                      ),
+                    )
+                    : const SizedBox.shrink(),
+          ),
+
+          // Haupt-FAB
+          FloatingActionButton(
+            heroTag: 'tactical_main',
+            onPressed: _toggleTacticalMenu,
+            backgroundColor:
+                _showTacticalMenu
+                    ? Colors.grey[600]
+                    : Theme.of(context).primaryColor,
+            child: AnimatedRotation(
+              turns: _showTacticalMenu ? 0.125 : 0,
+              duration: const Duration(milliseconds: 300),
+              child: Icon(
+                _showTacticalMenu ? Icons.close : Icons.add_location_alt,
+                color: Colors.white,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 
-  Widget _buildTacticalOption(String label, IconData icon, Color color, VoidCallback onTap) {
+  Widget _buildTacticalOption(
+    String label,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
@@ -771,10 +835,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ),
           child: Text(
             label,
-            style: const TextStyle(
-              fontWeight: FontWeight.w500,
-              fontSize: 14,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
           ),
         ),
         const SizedBox(width: 12),
@@ -789,66 +850,65 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-Widget _buildDownloadProgress() {
-  if (!_isDownloading) return const SizedBox.shrink();
-  
-  return Container(
-    color: Colors.black.withOpacity(0.5),
-    child: SafeArea(  // FIXED: SafeArea hinzugefügt
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          margin: const EdgeInsets.all(32),
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.3,  // FIXED: Max Höhe
-            maxWidth: MediaQuery.of(context).size.width * 0.8,    // FIXED: Max Breite
-          ),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.cloud_download,
-                size: 48,
-                color: Colors.blue,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Kartendaten werden heruntergeladen...',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+  Widget _buildDownloadProgress() {
+    if (!_isDownloading) return const SizedBox.shrink();
+
+    return Container(
+      color: Colors.black.withOpacity(0.5),
+      child: SafeArea(
+        // FIXED: SafeArea hinzugefügt
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            margin: const EdgeInsets.all(32),
+            constraints: BoxConstraints(
+              maxHeight:
+                  MediaQuery.of(context).size.height * 0.3, // FIXED: Max Höhe
+              maxWidth:
+                  MediaQuery.of(context).size.width * 0.8, // FIXED: Max Breite
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_download, size: 48, color: Colors.blue),
+                const SizedBox(height: 16),
+                Text(
+                  'Kartendaten werden heruntergeladen...',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2, // FIXED: Begrenze Textzeilen
+                  overflow: TextOverflow.ellipsis,
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 2,  // FIXED: Begrenze Textzeilen
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 16),
-              LinearProgressIndicator(
-                value: _downloadProgress,
-                backgroundColor: Colors.grey[300],
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${(_downloadProgress * 100).toInt()}%',
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-            ],
+                const SizedBox(height: 16),
+                LinearProgressIndicator(
+                  value: _downloadProgress,
+                  backgroundColor: Colors.grey[300],
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${(_downloadProgress * 100).toInt()}%',
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final isMaster = Provider.of<AuthProvider>(context).isMaster;
-    
+
     return Scaffold(
       body: Stack(
         children: [
@@ -864,15 +924,14 @@ Widget _buildDownloadProgress() {
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  tileProvider: (_offlineManager.isOfflineMode && _offlineManager.mapStore != null)
-                      ? _offlineManager.mapStore!.getTileProvider()
-                      : null,
+                  tileProvider:
+                      (_offlineManager.isOfflineMode &&
+                              _offlineManager.mapStore != null)
+                          ? _offlineManager.mapStore!.getTileProvider()
+                          : null,
                 ),
                 // Hydrantenmarker - wichtig: diese müssen immer als eigenes MarkerLayer dargestellt werden
-               if (_showHydrants) 
-  MarkerLayer(
-    markers: _hydrantMarkers,
-  ),
+                if (_showHydrants) MarkerLayer(markers: _hydrantMarkers),
                 // Taktische Marker als Cluster
                 if (_tacticalManager.markers.isNotEmpty)
                   MarkerClusterLayerWidget(
@@ -880,36 +939,38 @@ Widget _buildDownloadProgress() {
                       maxClusterRadius: 60,
                       size: const Size(40, 40),
                       markers: _tacticalManager.markers,
-                      builder: (context, markers) => markers.length == 1
-                          ? markers.first.child
-                          : Container(
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).primaryColor,
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.2),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 2),
+                      builder:
+                          (context, markers) =>
+                              markers.length == 1
+                                  ? markers.first.child
+                                  : Container(
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).primaryColor,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.2),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${markers.length}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ],
-                              ),
-                              child: Center(
-                                child: Text(
-                                  '${markers.length}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
                     ),
                   ),
               ],
             ),
           ),
-          
+
           // Search Bar
           Positioned(
             top: MediaQuery.of(context).padding.top + 16,
@@ -917,7 +978,7 @@ Widget _buildDownloadProgress() {
             right: 70,
             child: _buildSearchBar(),
           ),
-          
+
           // PDF Export Button
           Positioned(
             top: MediaQuery.of(context).padding.top + 16,
@@ -944,38 +1005,35 @@ Widget _buildDownloadProgress() {
                     borderRadius: BorderRadius.circular(16),
                     child: Container(
                       padding: const EdgeInsets.all(12),
-                      child: _isCapturing
-                          ? SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Theme.of(context).primaryColor,
+                      child:
+                          _isCapturing
+                              ? SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Theme.of(context).primaryColor,
+                                  ),
                                 ),
+                              )
+                              : Icon(
+                                Icons.picture_as_pdf,
+                                color: Theme.of(context).primaryColor,
                               ),
-                            )
-                          : Icon(
-                              Icons.picture_as_pdf,
-                              color: Theme.of(context).primaryColor,
-                            ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-          
+
           // Search Results
           _buildSearchResults(),
-          
+
           // Hydrant Control
-          Positioned(
-            left: 0,
-            bottom: 0,
-            child: _buildHydrantControl(),
-          ),
-          
+          Positioned(left: 0, bottom: 0, child: _buildHydrantControl()),
+
           // Download Progress
           if (_isDownloading) _buildDownloadProgress(),
         ],
@@ -984,4 +1042,3 @@ Widget _buildDownloadProgress() {
     );
   }
 }
-       
