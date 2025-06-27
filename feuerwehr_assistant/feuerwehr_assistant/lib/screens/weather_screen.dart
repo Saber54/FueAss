@@ -35,6 +35,18 @@ class _WeatherScreenState extends State<WeatherScreen> {
   bool _isSearching = false;
   Timer? _searchTimer;
 
+  int? _fireDangerLevel;
+  String? _fireDangerText;
+  Color? _fireDangerColor;
+
+  String? _solarWarning;
+  Color? _solarWarningColor;
+
+  List<String> _weatherWarnings = []; // NEU
+  Color _warningColor = Colors.red; // NEU
+
+  String? _currentPostcode; // NEU
+
   @override
   void initState() {
     super.initState();
@@ -67,16 +79,20 @@ class _WeatherScreenState extends State<WeatherScreen> {
     }
 
     _searchTimer?.cancel();
-    _searchTimer = Timer(const Duration(milliseconds: 500), () async {
-      setState(() {
-        _isSearching = true;
-      });
-      final results = await _searchService.searchLocation(query);
-      print('Suchergebnisse: $results'); // <--- Debug-Ausgabe
-      setState(() {
-        _searchResults = results;
-        _isSearching = false;
-      });
+    _searchTimer = Timer(const Duration(milliseconds: 500), () {
+      _doSearch(query);
+    });
+  }
+
+  Future<void> _doSearch(String query) async {
+    setState(() {
+      _isSearching = true;
+    });
+    final results = await _searchService.searchLocation(query);
+    print('Suchergebnisse: $results');
+    setState(() {
+      _searchResults = results;
+      _isSearching = false;
     });
   }
 
@@ -85,6 +101,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
       _latitude = location.latitude;
       _longitude = location.longitude;
       _currentLocation = location.displayName;
+      _currentPostcode = location.postcode; // NEU
       _searchResults = [];
       _searchController.clear();
     });
@@ -144,9 +161,12 @@ class _WeatherScreenState extends State<WeatherScreen> {
         setState(() {
           _hourlyWeather = weatherList;
           _isLoading = false;
-          _hasError = false;
-          _lastUpdated = DateFormat('dd.MM.yyyy HH:mm').format(DateTime.now());
         });
+
+        // HIER DIE NEUEN METHODEN AUFRUFEN:
+        await _fetchFireDangerLevel();
+        await _fetchWeatherWarnings();
+        _checkSolarRadiation();
       } else {
         throw Exception('Fehler beim Laden der Wetterdaten');
       }
@@ -165,6 +185,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
     await prefs.setDouble('weather_latitude', _latitude);
     await prefs.setDouble('weather_longitude', _longitude);
     await prefs.setString('weather_location', _currentLocation);
+    if (_currentPostcode != null) {
+      await prefs.setString('weather_postcode', _currentPostcode!); // NEU
+    }
   }
 
   Future<void> _loadLastLocation() async {
@@ -172,11 +195,145 @@ class _WeatherScreenState extends State<WeatherScreen> {
     final lat = prefs.getDouble('weather_latitude');
     final lon = prefs.getDouble('weather_longitude');
     final loc = prefs.getString('weather_location');
+    final postcode = prefs.getString('weather_postcode'); // NEU
     if (lat != null && lon != null && loc != null) {
       setState(() {
         _latitude = lat;
         _longitude = lon;
         _currentLocation = loc;
+        _currentPostcode = postcode; // NEU
+      });
+    }
+  }
+
+  Future<void> _fetchFireDangerLevel() async {
+    try {
+      if (_currentPostcode == null) {
+        setState(() {
+          _fireDangerText = 'Waldbrandstufe: Postleitzahl nicht verfügbar';
+          _fireDangerColor = Colors.grey;
+        });
+        return;
+      }
+
+      final response = await http.get(
+        Uri.parse(
+          'https://warnung.bund.de/api31/dashboard/${_currentPostcode!}.json',
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes));
+
+        // Suche nach Waldbrand-Warnungen
+        final warnings = data as List? ?? [];
+        bool hasFireDanger = false;
+        int dangerLevel = 1;
+
+        for (var warning in warnings) {
+          final headline = warning['headline']?.toString().toLowerCase() ?? '';
+          if (headline.contains('waldbrand') || headline.contains('feuer')) {
+            hasFireDanger = true;
+            // Extrahiere Stufe aus dem Text (vereinfacht)
+            if (headline.contains('hoch'))
+              dangerLevel = 4;
+            else if (headline.contains('mittel'))
+              dangerLevel = 3;
+            else if (headline.contains('gering'))
+              dangerLevel = 2;
+            else
+              dangerLevel = 3;
+            break;
+          }
+        }
+
+        setState(() {
+          _fireDangerLevel = dangerLevel;
+          _fireDangerText =
+              hasFireDanger
+                  ? 'Waldbrandstufe: $dangerLevel (Aktive Warnung)'
+                  : 'Waldbrandstufe: 1 (Niedrig)';
+          _fireDangerColor =
+              [
+                Colors.green,
+                Colors.yellow,
+                Colors.orange,
+                Colors.red,
+                Colors.deepOrange,
+              ][(dangerLevel - 1).clamp(0, 4)];
+        });
+      } else {
+        throw Exception('API nicht erreichbar');
+      }
+    } catch (e) {
+      setState(() {
+        _fireDangerLevel = 1;
+        _fireDangerText = 'Waldbrandstufe: 1 (Standard - API nicht verfügbar)';
+        _fireDangerColor = Colors.green;
+      });
+    }
+  }
+
+  Future<void> _fetchWeatherWarnings() async {
+    try {
+      if (_currentPostcode == null) {
+        setState(() {
+          _weatherWarnings = [];
+        });
+        return;
+      }
+
+      final response = await http.get(
+        Uri.parse(
+          'https://warnung.bund.de/api31/dashboard/${_currentPostcode!}.json',
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes));
+        final warnings = data as List? ?? [];
+
+        List<String> relevantWarnings = [];
+        for (var warning in warnings) {
+          final headline = warning['headline']?.toString() ?? '';
+          final msgType = warning['msgType']?.toString() ?? '';
+
+          // Nur Wetter-Warnungen (DWD)
+          if (msgType == 'Alert' && headline.isNotEmpty) {
+            final provider = warning['provider']?.toString() ?? '';
+            if (provider.contains('DWD') || headline.contains('Unwetter')) {
+              relevantWarnings.add(headline);
+            }
+          }
+        }
+
+        setState(() {
+          _weatherWarnings = relevantWarnings;
+          _warningColor =
+              relevantWarnings.isNotEmpty ? Colors.red : Colors.grey;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _weatherWarnings = [];
+      });
+    }
+  }
+
+  void _checkSolarRadiation() {
+    if (_hourlyWeather.isEmpty) return;
+
+    final maxRadiation = _hourlyWeather
+        .map((w) => w.solarRadiation)
+        .fold<double>(0, (a, b) => a > b ? a : b);
+    if (maxRadiation > 800) {
+      setState(() {
+        _solarWarning = 'Achtung: Sehr hohe Sonneneinstrahlung!';
+        _solarWarningColor = Colors.orange;
+      });
+    } else {
+      setState(() {
+        _solarWarning = null;
       });
     }
   }
@@ -260,6 +417,76 @@ class _WeatherScreenState extends State<WeatherScreen> {
                   ],
                 ),
               ),
+              // Warnhinweise
+              if (_fireDangerText != null || _fireDangerLevel != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: (_fireDangerColor ?? Colors.grey).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _fireDangerText ??
+                        'Waldbrandstufe: Daten werden geladen...',
+                    style: TextStyle(
+                      color: _fireDangerColor ?? Colors.grey,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              if (_weatherWarnings.isNotEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _warningColor.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children:
+                        _weatherWarnings
+                            .map(
+                              (msg) => Text(
+                                msg,
+                                style: TextStyle(
+                                  color: _warningColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                  ),
+                ),
+              if (_solarWarning != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _solarWarningColor?.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _solarWarning!,
+                    style: TextStyle(
+                      color: _solarWarningColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               // Wetter Content
               Expanded(child: _buildWeatherContent()),
             ],

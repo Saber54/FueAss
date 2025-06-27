@@ -5,6 +5,8 @@ class SearchResult {
   final double longitude;
   final String type;
   final String? icon;
+  final String? county;
+  final String? postcode; // NEU
 
   SearchResult({
     required this.displayName,
@@ -12,6 +14,8 @@ class SearchResult {
     required this.longitude,
     required this.type,
     this.icon,
+    this.county,
+    this.postcode, // NEU
   });
 
   // Factory constructor for Nominatim API response
@@ -22,6 +26,8 @@ class SearchResult {
       longitude: double.tryParse(json['lon']?.toString() ?? '') ?? 0.0,
       type: json['type'] ?? '',
       icon: json['icon'],
+      county: json['address']?['county'],
+      postcode: json['address']?['postcode'], // NEU
     );
   }
 
@@ -29,14 +35,18 @@ class SearchResult {
   factory SearchResult.fromJson(Map<String, dynamic> json) {
     return SearchResult(
       displayName: json['display_name'] ?? json['displayName'] ?? '',
-      latitude: json['lat'] != null 
-          ? double.tryParse(json['lat'].toString()) ?? 0.0
-          : json['latitude']?.toDouble() ?? 0.0,
-      longitude: json['lon'] != null 
-          ? double.tryParse(json['lon'].toString()) ?? 0.0
-          : json['longitude']?.toDouble() ?? 0.0,
+      latitude:
+          json['lat'] != null
+              ? double.tryParse(json['lat'].toString()) ?? 0.0
+              : json['latitude']?.toDouble() ?? 0.0,
+      longitude:
+          json['lon'] != null
+              ? double.tryParse(json['lon'].toString()) ?? 0.0
+              : json['longitude']?.toDouble() ?? 0.0,
       type: json['type'] ?? '',
       icon: json['icon'],
+      county: json['county'] ?? json['address']?['county'],
+      postcode: json['postcode'] ?? json['address']?['postcode'], // NEU
     );
   }
 
@@ -48,6 +58,8 @@ class SearchResult {
       'longitude': longitude,
       'type': type,
       if (icon != null) 'icon': icon,
+      if (county != null) 'county': county,
+      if (postcode != null) 'postcode': postcode, // NEU
     };
   }
 
