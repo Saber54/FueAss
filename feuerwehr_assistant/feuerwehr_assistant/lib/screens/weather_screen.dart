@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/search_service.dart';
 import '../services/search_result.dart';
-import 'dart:math';
 
 class WeatherScreen extends StatefulWidget {
   const WeatherScreen({super.key});
@@ -32,21 +31,16 @@ class _WeatherScreenState extends State<WeatherScreen> {
   final TextEditingController _searchController = TextEditingController();
   final SearchService _searchService = SearchService();
   List<SearchResult> _searchResults = [];
-  // ignore: unused_field
   bool _isSearching = false;
   Timer? _searchTimer;
-
-  int? _fireDangerLevel;
-  String? _fireDangerText;
-  Color? _fireDangerColor;
 
   String? _solarWarning;
   Color? _solarWarningColor;
 
-  List<String> _weatherWarnings = []; // NEU
-  Color _warningColor = Colors.red; // NEU
+  List<String> _weatherWarnings = [];
+  Color _warningColor = Colors.red;
 
-  String? _currentPostcode; // NEU
+  String? _currentPostcode;
 
   @override
   void initState() {
@@ -71,7 +65,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
   }
 
   Future<void> _searchLocation(String query) async {
-    print('Suche: $query'); // Debug
+    print('Suche: $query');
     if (query.isEmpty) {
       setState(() {
         _searchResults = [];
@@ -102,7 +96,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
       _latitude = location.latitude;
       _longitude = location.longitude;
       _currentLocation = location.displayName;
-      _currentPostcode = location.postcode; // NEU
+      _currentPostcode = location.postcode;
       _searchResults = [];
       _searchController.clear();
     });
@@ -151,8 +145,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
                     hourlyData['wind_direction_10m'][i]?.toInt() ?? 0,
                 windGusts: hourlyData['wind_gusts_10m'][i]?.toDouble() ?? 0.0,
                 solarRadiation:
-                    hourlyData['shortwave_radiation']?[i]?.toDouble() ??
-                    0.0, // NEU
+                    hourlyData['shortwave_radiation']?[i]?.toDouble() ?? 0.0,
               ),
             );
             hoursAdded++;
@@ -162,10 +155,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
         setState(() {
           _hourlyWeather = weatherList;
           _isLoading = false;
+          _lastUpdated = DateFormat('HH:mm').format(DateTime.now());
         });
 
-        // HIER DIE NEUEN METHODEN AUFRUFEN:
-        await _fetchFireDangerDWD(); // oder _fetchFireDangerByCoordinates();
         await _fetchWeatherWarningsDWD();
         _checkSolarRadiation();
       } else {
@@ -187,7 +179,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
     await prefs.setDouble('weather_longitude', _longitude);
     await prefs.setString('weather_location', _currentLocation);
     if (_currentPostcode != null) {
-      await prefs.setString('weather_postcode', _currentPostcode!); // NEU
+      await prefs.setString('weather_postcode', _currentPostcode!);
     }
   }
 
@@ -196,13 +188,13 @@ class _WeatherScreenState extends State<WeatherScreen> {
     final lat = prefs.getDouble('weather_latitude');
     final lon = prefs.getDouble('weather_longitude');
     final loc = prefs.getString('weather_location');
-    final postcode = prefs.getString('weather_postcode'); // NEU
+    final postcode = prefs.getString('weather_postcode');
     if (lat != null && lon != null && loc != null) {
       setState(() {
         _latitude = lat;
         _longitude = lon;
         _currentLocation = loc;
-        _currentPostcode = postcode; // NEU
+        _currentPostcode = postcode;
       });
     }
   }
@@ -251,260 +243,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
         _weatherWarnings = [];
       });
     }
-  }
-
-  Future<void> _fetchFireDangerDWD() async {
-    try {
-      if (_currentPostcode == null) {
-        setState(() {
-          _fireDangerLevel = 1;
-          _fireDangerText = 'Waldbrandstufe: 1 (keine PLZ verfügbar)';
-          _fireDangerColor = Colors.green;
-        });
-        return;
-      }
-
-      // Verwende die korrekte DWD-Waldbrandgefahren-API
-      final response = await http.get(
-        Uri.parse(
-          'https://opendata.dwd.de/climate_environment/health/alerts/s31fg.json',
-        ),
-        headers: {'User-Agent': 'FireApp/1.0'},
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(utf8.decode(response.bodyBytes));
-
-        // Finde nächstgelegenen Rasterpunkt basierend auf Koordinaten
-        double minDistance = double.infinity;
-        int dangerLevel = 1;
-        String locationInfo = '';
-
-        if (data['features'] != null) {
-          for (var feature in data['features']) {
-            final geometry = feature['geometry'];
-            final properties = feature['properties'];
-
-            if (geometry != null && geometry['coordinates'] != null) {
-              final coords = geometry['coordinates'];
-
-              // Berechne Distanz zu aktueller Position
-              double lat = 0, lon = 0;
-              if (coords is List && coords.length >= 2) {
-                lon = coords[0].toDouble();
-                lat = coords[1].toDouble();
-              }
-
-              final distance = _calculateDistance(
-                _latitude,
-                _longitude,
-                lat,
-                lon,
-              );
-
-              if (distance < minDistance) {
-                minDistance = distance;
-                // Verschiedene mögliche Feldnamen für Waldbrandindex
-                final wbi =
-                    properties['WBI'] ??
-                    properties['wbi'] ??
-                    properties['Stufe'] ??
-                    properties['stufe'] ??
-                    properties['level'] ??
-                    properties['index'];
-
-                dangerLevel = int.tryParse(wbi?.toString() ?? '1') ?? 1;
-                locationInfo = properties['name'] ?? properties['region'] ?? '';
-              }
-            }
-          }
-        }
-
-        setState(() {
-          _fireDangerLevel = dangerLevel;
-          _fireDangerText =
-              'Waldbrandstufe: $dangerLevel (${minDistance.toStringAsFixed(1)}km entfernt)';
-          _fireDangerColor =
-              [
-                Colors.green, // Stufe 1
-                Colors.yellow, // Stufe 2
-                Colors.orange, // Stufe 3
-                Colors.red, // Stufe 4
-                Colors.deepOrange, // Stufe 5
-              ][(dangerLevel - 1).clamp(0, 4)];
-        });
-      } else {
-        throw Exception('DWD API Status: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('DWD Waldbrand Fehler: $e');
-
-      // Fallback: Schätze anhand der Sonneneinstrahlung
-      _estimateFireDangerFromWeather();
-    }
-  }
-
-  Future<void> _fetchFireDangerByCoordinates() async {
-    try {
-      // Verwende Koordinaten für Waldbrandgefahrenschätzung
-      // Basierend auf aktuellen Wetterdaten aus Open-Meteo
-      final response = await http.get(
-        Uri.parse(
-          'https://api.open-meteo.com/v1/forecast?latitude=$_latitude&longitude=$_longitude&daily=temperature_2m_max,temperature_2m_min,relative_humidity_2m,precipitation_sum,wind_speed_10m_max&timezone=auto&forecast_days=1',
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final daily = data['daily'];
-
-        if (daily != null && daily['temperature_2m_max'] != null) {
-          final maxTemp = daily['temperature_2m_max'][0]?.toDouble() ?? 15.0;
-          final minHumidity =
-              daily['relative_humidity_2m'][0]?.toDouble() ?? 70.0;
-          final precipitation =
-              daily['precipitation_sum'][0]?.toDouble() ?? 0.0;
-          final maxWind = daily['wind_speed_10m_max'][0]?.toDouble() ?? 5.0;
-
-          // Berechne Waldbrandgefahrenstufe nach vereinfachten Kriterien
-          int level = 1;
-
-          // Temperatur-Faktor
-          if (maxTemp > 30)
-            level += 2;
-          else if (maxTemp > 25)
-            level += 1;
-
-          // Luftfeuchtigkeits-Faktor
-          if (minHumidity < 30)
-            level += 2;
-          else if (minHumidity < 50)
-            level += 1;
-
-          // Niederschlags-Faktor (reduziert Gefahr)
-          if (precipitation < 1.0)
-            level += 1;
-          else if (precipitation > 5.0)
-            level -= 1;
-
-          // Wind-Faktor
-          if (maxWind > 25)
-            level += 1;
-          else if (maxWind > 15)
-            level += 0; // kein Bonus
-
-          level = level.clamp(1, 5);
-
-          setState(() {
-            _fireDangerLevel = level;
-            _fireDangerText =
-                'Waldbrandstufe: $level (berechnet: ${maxTemp.toStringAsFixed(0)}°C, ${minHumidity.toStringAsFixed(0)}% Feuchte)';
-            _fireDangerColor =
-                [
-                  Colors.green,
-                  Colors.yellow,
-                  Colors.orange,
-                  Colors.red,
-                  Colors.deepOrange,
-                ][(level - 1).clamp(0, 4)];
-          });
-        } else {
-          throw Exception('Unvollständige Wetterdaten');
-        }
-      } else {
-        throw Exception('Open-Meteo API Fehler');
-      }
-    } catch (e) {
-      print('Koordinaten-basierte Schätzung Fehler: $e');
-      _estimateFireDangerFromWeather();
-    }
-  }
-
-  // Hilfsfunktion für Distanzberechnung
-  double _calculateDistance(
-    double lat1,
-    double lon1,
-    double lat2,
-    double lon2,
-  ) {
-    const double earthRadius = 6371; // km
-
-    final dLat = _degreesToRadians(lat2 - lat1);
-    final dLon = _degreesToRadians(lon2 - lon1);
-
-    final a =
-        sin(dLat / 2) * sin(dLat / 2) +
-        cos(_degreesToRadians(lat1)) *
-            cos(_degreesToRadians(lat2)) *
-            sin(dLon / 2) *
-            sin(dLon / 2);
-
-    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    return earthRadius * c;
-  }
-
-  double _degreesToRadians(double degrees) {
-    return degrees * pi / 180;
-  }
-
-  // Fallback: Schätze Waldbrandgefahr anhand der Wetterdaten
-  void _estimateFireDangerFromWeather() {
-    if (_hourlyWeather.isEmpty) {
-      setState(() {
-        _fireDangerLevel = 1;
-        _fireDangerText = 'Waldbrandstufe: 1 (geschätzt)';
-        _fireDangerColor = Colors.green;
-      });
-      return;
-    }
-
-    // Analysiere die nächsten 24h
-    double avgTemp = 0;
-    double avgHumidity = 0;
-    double maxWind = 0;
-    double totalRain = 0;
-    int count = 0;
-
-    for (var weather in _hourlyWeather.take(24)) {
-      avgTemp += weather.temperature;
-      avgHumidity += weather.humidity;
-      if (weather.windSpeed > maxWind) maxWind = weather.windSpeed;
-      totalRain += weather.precipitation;
-      count++;
-    }
-
-    if (count > 0) {
-      avgTemp /= count;
-      avgHumidity /= count;
-    }
-
-    // Einfache Schätzung basierend auf Wetterdaten
-    int estimatedLevel = 1;
-
-    if (avgTemp > 25 && avgHumidity < 30 && totalRain < 1.0) {
-      estimatedLevel = 4; // Hoch
-    } else if (avgTemp > 20 && avgHumidity < 50 && totalRain < 2.0) {
-      estimatedLevel = 3; // Mittel-hoch
-    } else if (avgTemp > 15 && avgHumidity < 70) {
-      estimatedLevel = 2; // Mittel
-    }
-
-    // Wind verstärkt die Gefahr
-    if (maxWind > 20) estimatedLevel = (estimatedLevel + 1).clamp(1, 5);
-
-    setState(() {
-      _fireDangerLevel = estimatedLevel;
-      _fireDangerText =
-          'Waldbrandstufe: $estimatedLevel (aus Wetter geschätzt)';
-      _fireDangerColor =
-          [
-            Colors.green,
-            Colors.yellow,
-            Colors.orange,
-            Colors.red,
-            Colors.deepOrange,
-          ][(estimatedLevel - 1).clamp(0, 4)];
-    });
   }
 
   void _checkSolarRadiation() {
@@ -605,27 +343,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
                 ),
               ),
               // Warnhinweise
-              if (_fireDangerText != null || _fireDangerLevel != null)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(8),
-                  margin: const EdgeInsets.symmetric(
-                    vertical: 4,
-                    horizontal: 16,
-                  ),
-                  decoration: BoxDecoration(
-                    color: (_fireDangerColor ?? Colors.grey).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    _fireDangerText ??
-                        'Waldbrandstufe: Daten werden geladen...',
-                    style: TextStyle(
-                      color: _fireDangerColor ?? Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
               if (_weatherWarnings.isNotEmpty)
                 Container(
                   width: double.infinity,
@@ -681,8 +398,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
           // Vorschlagsliste als Overlay
           if (_searchResults.isNotEmpty)
             Positioned(
-              // Passe top ggf. an, je nach Höhe deines Headers
-              top: 110, // Höhe des Headers + Padding
+              top: 110,
               left: 16,
               right: 16,
               child: Material(
@@ -764,7 +480,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
           children: [
             // Horizontale Stundenleiste
             SizedBox(
-              height: 140, // Erhöht für Datum-Labels
+              height: 140,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 itemCount: _hourlyWeather.length,
@@ -1080,70 +796,6 @@ class WeatherDetailCard extends StatelessWidget {
         ),
       ],
     );
-  }
-
-  IconData _getWeatherIcon(int code) {
-    switch (code) {
-      case 0:
-        return Icons.wb_sunny;
-      case 1:
-      case 2:
-      case 3:
-        return Icons.wb_cloudy;
-      case 45:
-      case 48:
-        return Icons.foggy;
-      case 51:
-      case 53:
-      case 55:
-        return Icons.grain;
-      case 61:
-      case 63:
-      case 65:
-        return Icons.water_drop;
-      case 71:
-      case 73:
-      case 75:
-        return Icons.ac_unit;
-      case 95:
-      case 96:
-      case 99:
-        return Icons.thunderstorm;
-      default:
-        return Icons.help_outline;
-    }
-  }
-
-  Color _getWeatherColor(int code) {
-    switch (code) {
-      case 0:
-        return Colors.orange;
-      case 1:
-      case 2:
-      case 3:
-        return Colors.grey;
-      case 45:
-      case 48:
-        return Colors.blueGrey;
-      case 51:
-      case 53:
-      case 55:
-        return Colors.lightBlue;
-      case 61:
-      case 63:
-      case 65:
-        return Colors.blue;
-      case 71:
-      case 73:
-      case 75:
-        return Colors.lightBlue;
-      case 95:
-      case 96:
-      case 99:
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
   }
 
   String _getWindDirection(int degrees) {
