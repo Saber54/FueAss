@@ -1,6 +1,0 @@
-{
-    "isConfigured": false,
-    "serverIp": "192.168.1.100",
-    "defaultTheme": "dark",
-    "hazmatCategories": ["Chemikalien", "Explosiv", "Radioaktiv"]
-  }

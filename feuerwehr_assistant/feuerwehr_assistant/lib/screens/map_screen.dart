@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_marker_cluster_plus/flutter_map_marker_cluster_plus.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../providers/auth_provider.dart';
 import '../services/offline_data_manager.dart' as offline;
 import '../services/search_service.dart' as search;
@@ -12,8 +13,9 @@ import '../services/pdf_export_service.dart';
 import '../services/tactical_marker_manager.dart';
 import '../services/search_result.dart';
 import '../services/tactical_symbol_service.dart';
-import '../models/tactical_symbol.dart';
-import '../widgets/tactical_symbol_picker.dart';
+import '../services/tactical_symbols_loader.dart'
+    as loader; // GEÄNDERT: Prefix hinzugefügt
+import '../widgets/tactical_symbol_selector.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -36,6 +38,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final PdfExportService _pdfService = PdfExportService();
   final TacticalMarkerManager _tacticalManager = TacticalMarkerManager();
   final TacticalSymbolService _tacticalSymbolService = TacticalSymbolService();
+  final loader.TacticalSymbolsLoader _tacticalSymbolsLoader =
+      loader.TacticalSymbolsLoader(); // GEÄNDERT: Prefix verwendet
 
   final List<Marker> _hydrantMarkers = [];
   LatLng? _lastTapPosition;
@@ -75,6 +79,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeServices();
     });
+
+    // Lade taktische Zeichen
+    _tacticalSymbolsLoader.loadSymbols();
   }
 
   @override
@@ -362,123 +369,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
   }
 
-  void _toggleTacticalMenu() {
-    setState(() => _showTacticalMenu = !_showTacticalMenu);
-    if (_showTacticalMenu) {
-      _fabAnimationController.forward();
-    } else {
-      _fabAnimationController.reverse();
-    }
-  }
-
-  void _showTacticalSymbolPicker(TacticalSymbolCategory category) {
-    setState(() => _showTacticalMenu = false);
-    _fabAnimationController.reverse();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder:
-          (context) => DraggableScrollableSheet(
-            initialChildSize: 0.6,
-            minChildSize: 0.4,
-            maxChildSize: 0.9,
-            builder:
-                (context, scrollController) => TacticalSymbolPicker(
-                  category: category,
-                  onSymbolSelected: _addTacticalSymbol,
-                ),
-          ),
-    );
-  }
-
-  void _addTacticalSymbol(TacticalSymbol symbol) {
-    if (_lastTapPosition == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(
-            children: [
-              Icon(Icons.info, color: Colors.white),
-              SizedBox(width: 8),
-              Text('Bitte zuerst auf die Karte tippen'),
-            ],
-          ),
-          backgroundColor: Colors.blue,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
-      return;
-    }
-
-    // Hier würde normalerweise die spezifische Symbol-Logik implementiert werden
-    // Für jetzt verwenden wir die bestehenden Methoden als Fallback
-    switch (symbol.category) {
-      case TacticalSymbolCategory.vehicle:
-        _tacticalManager.addVehicle(_lastTapPosition!);
-        break;
-      case TacticalSymbolCategory.hazard:
-        _tacticalManager.addHazard(_lastTapPosition!);
-        break;
-      default:
-        // Für andere Kategorien könnten neue Methoden im TacticalMarkerManager hinzugefügt werden
-        _tacticalManager.addVehicle(_lastTapPosition!); // Fallback
-        break;
-    }
-
-    setState(() {});
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 8),
-            Text('${symbol.name} hinzugefügt'),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  Future<void> _searchLocation(String query) async {
-    if (query.isEmpty) return;
-    setState(() => _isSearching = true);
-    _searchAnimationController.forward();
-    final results = await _searchService.searchLocation(query);
-    setState(() {
-      _searchResults = results;
-      _isSearching = false;
-    });
-    _searchAnimationController.reverse();
-  }
-
-  Future<void> _captureAndPrintMap() async {
-    if (_isCapturing) return;
-    setState(() => _isCapturing = true);
-    try {
-      final imageBytes = await _pdfService.captureMapAsImage(_mapKey);
-      if (imageBytes != null && mounted) {
-        final pdf = _pdfService.createMapPDF(
-          imageBytes,
-          _mapController,
-          _offlineManager.isOfflineMode,
-          _showHydrants,
-          _hydrantMarkers.length,
-          _tacticalManager.count,
-        );
-        await _pdfService.showExportDialog(context, pdf);
-      }
-    } finally {
-      if (mounted) setState(() => _isCapturing = false);
-    }
-  }
-
   Widget _buildSearchBar() {
     return AnimatedOpacity(
       opacity: _showControls ? 1.0 : 0.0,
@@ -717,137 +607,166 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     return AnimatedOpacity(
       opacity: _showControls ? 1.0 : 0.0,
       duration: const Duration(milliseconds: 300),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          // Menü-Optionen - FIXED: Flexible Höhe statt feste Höhe
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            constraints: BoxConstraints(
-              maxHeight:
-                  _showTacticalMenu
-                      ? MediaQuery.of(context).size.height *
-                          0.6 // Max 60% der Bildschirmhöhe
-                      : 0,
-            ),
-            child:
-                _showTacticalMenu
-                    ? SingleChildScrollView(
-                      // FIXED: Scrollbar hinzugefügt
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          _buildTacticalOption(
-                            'Fahrzeuge',
-                            Icons.directions_car,
-                            Colors.green,
-                            () => _showTacticalSymbolPicker(
-                              TacticalSymbolCategory.vehicle,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _buildTacticalOption(
-                            'Gefahren',
-                            Icons.warning,
-                            Colors.red,
-                            () => _showTacticalSymbolPicker(
-                              TacticalSymbolCategory.hazard,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _buildTacticalOption(
-                            'Ausrüstung',
-                            Icons.build,
-                            Colors.blue,
-                            () => _showTacticalSymbolPicker(
-                              TacticalSymbolCategory.equipment,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _buildTacticalOption(
-                            'Personal',
-                            Icons.person,
-                            Colors.purple,
-                            () => _showTacticalSymbolPicker(
-                              TacticalSymbolCategory.personnel,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _buildTacticalOption(
-                            'Infrastruktur',
-                            Icons.business,
-                            Colors.brown,
-                            () => _showTacticalSymbolPicker(
-                              TacticalSymbolCategory.infrastructure,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                      ),
-                    )
-                    : const SizedBox.shrink(),
-          ),
-
-          // Haupt-FAB
-          FloatingActionButton(
-            heroTag: 'tactical_main',
-            onPressed: _toggleTacticalMenu,
-            backgroundColor:
-                _showTacticalMenu
-                    ? Colors.grey[600]
-                    : Theme.of(context).primaryColor,
-            child: AnimatedRotation(
-              turns: _showTacticalMenu ? 0.125 : 0,
-              duration: const Duration(milliseconds: 300),
-              child: Icon(
-                _showTacticalMenu ? Icons.close : Icons.add_location_alt,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ],
+      child: FloatingActionButton(
+        heroTag: 'tactical_symbols',
+        onPressed: _showTacticalSymbolSelector,
+        backgroundColor: Theme.of(context).primaryColor,
+        child: const Icon(Icons.add_location_alt, color: Colors.white),
       ),
     );
   }
 
-  Widget _buildTacticalOption(
-    String label,
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
+  // Neue Methode für Symbolauswahl:
+  void _showTacticalSymbolSelector() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) =>
+              TacticalSymbolSelector(onSymbolSelected: _addTacticalSymbol),
+    );
+  }
+
+  // GEÄNDERT: Parametertypänderung
+  void _addTacticalSymbol(loader.TacticalSymbol symbol) {
+    // GEÄNDERT: loader.TacticalSymbol verwendet
+    LatLng targetPosition;
+
+    // Wenn keine Position durch Tippen ausgewählt wurde, verwende Kartenmitte
+    if (_lastTapPosition == null) {
+      targetPosition = _mapController.camera.center;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.info, color: Colors.white),
+              SizedBox(width: 8),
+              Text('Symbol in Kartenmitte hinzugefügt'),
+            ],
+          ),
+          backgroundColor: Colors.blue,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      targetPosition = _lastTapPosition!;
+    }
+
+    // Erstelle Marker mit SVG-Symbol - GRÖSSERES SYMBOL OHNE WEISSEN KREIS
+    final marker = Marker(
+      point: targetPosition,
+      width: 60, // VERGRÖSSERT von 40 auf 60
+      height: 60, // VERGRÖSSERT von 40 auf 60
+      child: GestureDetector(
+        onTap: () => _showSymbolInfo(symbol),
+        child: Container(
+          // ENTFERNT: Weißer Hintergrund und Schatten
+          child: SvgPicture.asset(
+            symbol.assetPath,
+            width: 60, // VERGRÖSSERT von 32 auf 60
+            height: 60, // VERGRÖSSERT von 32 auf 60
+            fit: BoxFit.contain,
+            placeholderBuilder:
+                (context) => Icon(
+                  Icons.place,
+                  color: Theme.of(context).primaryColor,
+                  size: 60, // VERGRÖSSERT von 32 auf 60
+                ),
+          ),
+        ),
+      ),
+    );
+
+    // Füge Marker zum TacticalMarkerManager hinzu
+    _tacticalManager.addCustomMarker(marker);
+
+    setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 8),
+            Text('${symbol.name} hinzugefügt'),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // GEÄNDERT: Parametertypänderung
+  void _showSymbolInfo(loader.TacticalSymbol symbol) {
+    // GEÄNDERT: loader.TacticalSymbol verwendet
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(symbol.name),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SvgPicture.asset(
+                  symbol.assetPath,
+                  width: 100,
+                  height: 100,
+                  fit: BoxFit.contain,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Kategorie: ${_tacticalSymbolsLoader.getCategoryDisplayName(symbol.category)}',
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Schließen'),
               ),
             ],
           ),
-          child: Text(
-            label,
-            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-          ),
-        ),
-        const SizedBox(width: 12),
-        FloatingActionButton(
-          heroTag: 'tactical_$label',
-          mini: true,
-          onPressed: onTap,
-          backgroundColor: color,
-          child: Icon(icon, color: Colors.white),
-        ),
-      ],
     );
+  }
+
+  Future<void> _searchLocation(String query) async {
+    if (query.isEmpty) return;
+    setState(() => _isSearching = true);
+    _searchAnimationController.forward();
+    final results = await _searchService.searchLocation(query);
+    setState(() {
+      _searchResults = results;
+      _isSearching = false;
+    });
+    _searchAnimationController.reverse();
+  }
+
+  Future<void> _captureAndPrintMap() async {
+    if (_isCapturing) return;
+    setState(() => _isCapturing = true);
+    try {
+      final imageBytes = await _pdfService.captureMapAsImage(_mapKey);
+      if (imageBytes != null && mounted) {
+        final pdf = _pdfService.createMapPDF(
+          imageBytes,
+          _mapController,
+          _offlineManager.isOfflineMode,
+          _showHydrants,
+          _hydrantMarkers.length,
+          _tacticalManager.count,
+        );
+        await _pdfService.showExportDialog(context, pdf);
+      }
+    } finally {
+      if (mounted) setState(() => _isCapturing = false);
+    }
   }
 
   Widget _buildDownloadProgress() {
