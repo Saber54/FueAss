@@ -7,7 +7,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
-
 import '../providers/auth_provider.dart';
 import '../services/offline_data_manager.dart' as offline;
 import '../services/search_service.dart' as search;
@@ -965,34 +964,56 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             point: markerData.position,
                             width: markerSize,
                             height: markerSize,
-                            // HINZUGEFÜGT: Anchor für Mittelpunkt-Positionierung
                             alignment: Alignment.center,
                             child: LongPressDraggable<DraggableMarkerData>(
                               data: markerData,
-                              // KORRIGIERT: Feedback mit korrekter Größe und Position
+                              // KORRIGIERT: Feedback mit exakter Positionierung
                               feedback: Material(
                                 color: Colors.transparent,
-                                child: Container(
-                                  width: markerSize * 1.2,
-                                  height: markerSize * 1.2,
-                                  decoration: BoxDecoration(
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.4),
-                                        blurRadius: 12,
-                                        offset: const Offset(0, 6),
-                                      ),
-                                    ],
-                                  ),
-                                  child: SvgPicture.asset(
-                                    markerData.symbol.assetPath,
+                                child: Transform.translate(
+                                  offset: Offset(
+                                    -markerSize / 2,
+                                    -markerSize / 2,
+                                  ), // WICHTIG: Offset korrigieren
+                                  child: Container(
                                     width: markerSize * 1.2,
                                     height: markerSize * 1.2,
-                                    fit: BoxFit.contain,
+                                    decoration: BoxDecoration(
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.4),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: SvgPicture.asset(
+                                      markerData.symbol.assetPath,
+                                      width: markerSize * 1.2,
+                                      height: markerSize * 1.2,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (
+                                        context,
+                                        error,
+                                        stackTrace,
+                                      ) {
+                                        return Container(
+                                          decoration: BoxDecoration(
+                                            color:
+                                                Theme.of(context).primaryColor,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: Icon(
+                                            Icons.fire_truck,
+                                            color: Colors.white,
+                                            size: markerSize * 0.6,
+                                          ),
+                                        );
+                                      },
+                                    ),
                                   ),
                                 ),
                               ),
-                              // KORRIGIERT: Child when dragging mit reduzierter Opazität
                               childWhenDragging: Opacity(
                                 opacity: 0.2,
                                 child: SvgPicture.asset(
@@ -1002,7 +1023,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   fit: BoxFit.contain,
                                 ),
                               ),
-                              // REDUZIERT: Kürzeres Delay für responsiveres Verhalten
                               delay: const Duration(milliseconds: 50),
                               child: GestureDetector(
                                 onTap:
@@ -1010,31 +1030,38 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                       markerData.symbol,
                                       markerData.id,
                                     ),
-                                child: Container(
+                                child: SvgPicture.asset(
+                                  markerData.symbol.assetPath,
                                   width: markerSize,
                                   height: markerSize,
-                                  // HINZUGEFÜGT: Container für präzise Positionierung
-                                  alignment: Alignment.center,
-                                  child: SvgPicture.asset(
-                                    markerData.symbol.assetPath,
-                                    width: markerSize,
-                                    height: markerSize,
-                                    fit: BoxFit.contain,
-                                    placeholderBuilder:
-                                        (context) => Icon(
-                                          Icons.place,
-                                          color: Theme.of(context).primaryColor,
-                                          size: markerSize,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    if (error.toString().contains(
+                                          'font-size',
+                                        ) ||
+                                        error.toString().contains('parse')) {
+                                      return Container(
+                                        width: markerSize,
+                                        height: markerSize,
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(
+                                            context,
+                                          ).primaryColor.withOpacity(0.8),
+                                          shape: BoxShape.circle,
                                         ),
-                                    errorBuilder: (context, error, stackTrace) {
-                                      print('SVG Fehler: $error');
-                                      return Icon(
-                                        Icons.place,
-                                        color: Colors.red,
-                                        size: markerSize,
+                                        child: Icon(
+                                          Icons.fire_truck,
+                                          color: Colors.white,
+                                          size: markerSize * 0.6,
+                                        ),
                                       );
-                                    },
-                                  ),
+                                    }
+                                    return Icon(
+                                      Icons.place,
+                                      color: Colors.red,
+                                      size: markerSize,
+                                    );
+                                  },
                                 ),
                               ),
                             ),
@@ -1049,67 +1076,52 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               onWillAccept: (data) => data != null,
               onAcceptWithDetails: (details) {
                 final markerData = details.data;
-                
+
                 if (!_isMapReady) return;
-                
+
                 try {
-                  final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+                  final RenderBox? renderBox =
+                      context.findRenderObject() as RenderBox?;
                   if (renderBox == null) return;
-                  
-                  // KORRIGIERT: Präzise Pixel-zu-LatLng Umrechnung
+
+                  // EINFACH: Lokale Position holen (OHNE Korrektur, da im Feedback korrigiert)
                   final localPosition = renderBox.globalToLocal(details.offset);
-                  
-                  // Hole aktuelle Kamera-Daten
-                  final camera = _mapController.camera;
-                  final mapCenter = camera.center;
-                  final zoom = camera.zoom;
                   final mapSize = renderBox.size;
-                  
-                  // Berechne den Offset vom Kartenmittelpunkt
-                  final centerPixel = Offset(mapSize.width / 2, mapSize.height / 2);
-                  final deltaPixel = localPosition - centerPixel;
-                  
-                  // PRÄZISE Berechnung: Meter pro Pixel bei aktuellem Zoom
-                  const earthCircumference = 40075016.686; // Meter
-                  final metersPerPixel = earthCircumference * math.cos(mapCenter.latitude * math.pi / 180) / math.pow(2, zoom + 8);
-                  
-                  // Konvertiere Pixel-Delta zu Meter-Delta
-                  final deltaMetersX = deltaPixel.dx * metersPerPixel;
-                  final deltaMetersY = -deltaPixel.dy * metersPerPixel; // Y ist invertiert
-                  
-                  // Konvertiere Meter zu Grad
-                  const metersPerDegreeLat = 111320.0;
-                  final metersPerDegreeLng = 111320.0 * math.cos(mapCenter.latitude * math.pi / 180);
-                  
-                  final deltaLat = deltaMetersY / metersPerDegreeLat;
-                  final deltaLng = deltaMetersX / metersPerDegreeLng;
-                  
-                  // Berechne neue Position
-                  final newPosition = LatLng(
-                    mapCenter.latitude + deltaLat,
-                    mapCenter.longitude + deltaLng,
-                  );
-                  
+
+                  final relativeX = localPosition.dx / mapSize.width;
+                  final relativeY = localPosition.dy / mapSize.height;
+
+                  final bounds = _mapController.camera.visibleBounds;
+
+                  final newLng =
+                      bounds.west + (bounds.east - bounds.west) * relativeX;
+                  final newLat =
+                      bounds.north - (bounds.north - bounds.south) * relativeY;
+
+                  final newPosition = LatLng(newLat, newLng);
+
                   _moveMarker(markerData.id, newPosition);
                   HapticFeedback.lightImpact();
-                  
-                  debugPrint('Pixel: $localPosition -> LatLng: $newPosition');
-                  
                 } catch (e) {
                   debugPrint('Error moving marker: $e');
                 }
               },
               builder: (context, candidateData, rejectedData) {
                 return Container(
-                  decoration: candidateData.isNotEmpty
-                      ? BoxDecoration(
-                          color: Theme.of(context).primaryColor.withOpacity(0.1),
-                          border: Border.all(
-                            color: Theme.of(context).primaryColor.withOpacity(0.3),
-                            width: 2,
-                          ),
-                        )
-                      : null,
+                  decoration:
+                      candidateData.isNotEmpty
+                          ? BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).primaryColor.withOpacity(0.1),
+                            border: Border.all(
+                              color: Theme.of(
+                                context,
+                              ).primaryColor.withOpacity(0.3),
+                              width: 2,
+                            ),
+                          )
+                          : null,
                 );
               },
             ),
