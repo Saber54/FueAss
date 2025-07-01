@@ -1,6 +1,5 @@
 // lib/widgets/tactical_symbol_selector.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../services/tactical_symbols_loader.dart'; // Verwendet nur diese TacticalSymbol Klasse
 
@@ -159,29 +158,9 @@ class _TacticalSymbolSelectorState extends State<TacticalSymbolSelector> {
               flex: 3,
               child: Container(
                 padding: const EdgeInsets.all(8),
-                child: FutureBuilder<bool>(
-                  future: _checkAssetExists(symbol.assetPath),
-                  builder: (context, snapshot) {
-                    if (snapshot.data == true) {
-                      return SvgPicture.asset(
-                        symbol.assetPath,
-                        width: double.infinity,
-                        height: double.infinity,
-                        fit: BoxFit.contain,
-                        placeholderBuilder:
-                            (context) => const Icon(
-                              Icons.image_not_supported,
-                              color: Colors.grey,
-                            ),
-                      );
-                    } else {
-                      return const Icon(
-                        Icons.image_not_supported,
-                        color: Colors.grey,
-                      );
-                    }
-                  },
-                ),
+                child: _buildSymbolWidget(
+                  symbol,
+                ), // GEÄNDERT: Vereinfachtes Widget
               ),
             ),
             Expanded(
@@ -203,12 +182,22 @@ class _TacticalSymbolSelectorState extends State<TacticalSymbolSelector> {
     );
   }
 
-  Future<bool> _checkAssetExists(String assetPath) async {
-    try {
-      await rootBundle.load(assetPath);
-      return true;
-    } catch (e) {
-      return false;
-    }
+  // NEUE METHODE: Vereinfachtes Symbol-Widget
+  Widget _buildSymbolWidget(TacticalSymbol symbol) {
+    return SvgPicture.asset(
+      symbol.assetPath,
+      width: double.infinity,
+      height: double.infinity,
+      fit: BoxFit.contain,
+      // ENTFERNT: FutureBuilder - das verursacht Probleme
+      placeholderBuilder:
+          (context) =>
+              const Icon(Icons.image_not_supported, color: Colors.grey),
+      // HINZUGEFÜGT: Error-Handler
+      errorBuilder: (context, error, stackTrace) {
+        print('SVG Fehler für ${symbol.assetPath}: $error');
+        return const Icon(Icons.image_not_supported, color: Colors.red);
+      },
+    );
   }
 }
